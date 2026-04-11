@@ -548,7 +548,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             
             prompt = (
                 f"CURRENT TIME: {now_str}\n" 
-                "You are the 10X Health Coach. Analyze the last 14 days of health data. "
+                "You are the Ekatra Health Coach. Analyze the last 14 days of health data. "
                 "Provide a single, proactive, and FRESH health insight (max 2 sentences). "
                 "If the data is stagnant compared to previous days, explicitly mention it or find a minor nuance to highlight. "
                 "Avoid repeating generic advice. Be punchy.\n\n"
@@ -636,7 +636,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GOOGLE_API_KEY}"
             
             prompt = (
-                "You are the 10X Health Scientist. Analyze the last 14 days of Sleep and Recovery data.\n"
+                "You are the Ekatra Health Scientist. Analyze the last 14 days of Sleep and Recovery data.\n"
                 "DATA CONTEXT: Sleep Trend, HRV/RHR, AND Sleep/Wake Schedule consistency.\n"
                 "Provide a 3-part response that GUIDES the user:\n"
                 "1. WHAT'S GOING WELL: Focus on wins (e.g., consistent bedtime or high deep sleep) (max 1 sentence).\n"
@@ -705,7 +705,7 @@ if __name__ == "__main__":
         allow_reuse_address = True
 
     with ReusableTCPServer(("", PORT), Handler) as httpd:
-        print(f"🚀 Apple Watch 10X Insights → http://localhost:{PORT}")
+        print(f"🚀 Ekatra — Personal Health Intelligence → http://localhost:{PORT}")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

@@ -1,4 +1,4 @@
-# iOS Native App Setup (10X Insights)
+# iOS Native App Setup (Ekatra)
 
 This app automates health data synchronization, replacing the need for manual XML exports or complex Shortcuts.
 
@@ -15,7 +15,7 @@ This app automates health data synchronization, replacing the need for manual XM
 2. **Configure Signing**:
    - Select the `10XInsights` project in the left sidebar.
    - Go to **Signing & Capabilities**.
-   - Select your Team (or add your Apple ID) and change the **Bundle Identifier** to something unique (e.g., `com.yourname.10XInsights`).
+   - Select your Team (or add your Apple ID) and change the **Bundle Identifier** to something unique (e.g., `com.yourname.ekatra`).
 
 3. **Deploy to iPhone**:
    - Select your iPhone as the build target in the top bar.

@@ -1,1 +1,30 @@
-/data
+# ── Personal Health Data ─────────────────────────────────────────────────────
+# Your actual health data — never commit this
+/data/
+parsed.json
+data/export.xml
+data/parsed.json
+data/latest.json
+data/tags.json
+data/*.pdf
+data/*.json
+data/*.xml
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+server.log
+*.log
+
+# ── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/

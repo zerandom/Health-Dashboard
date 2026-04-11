@@ -11,7 +11,7 @@ struct ContentView: View {
                 .font(.system(size: 60))
                 .foregroundColor(.blue)
 
-            Text("10X Insights Sync")
+            Text("Ekatra Sync")
                 .font(.largeTitle)
                 .fontWeight(.bold)
 

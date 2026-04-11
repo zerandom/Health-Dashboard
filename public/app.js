@@ -1,4 +1,4 @@
-// Apple Watch 10X Insights — Core Application Logic
+// Ekatra — Personal Health Intelligence | Core Application Logic
 // Data priority: 1. Server-parsed XML  2. Live sync (iOS Shortcut)  3. Demo
 
 // ── 1. Global State ──────────────────────────────────────────────────────────
