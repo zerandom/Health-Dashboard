@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apple Watch 10X Insights</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    <!-- Chart.js and Plugins -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="logo">
+                <span class="logo-icon white">✦</span>
+                <span class="logo-text">10X INSIGHTS</span>
+            </div>
+            <ul class="nav-links">
+                <li class="active" data-target="dashboard">Dashboard</li>
+                <li data-target="sleep-recovery">Sleep & Recovery</li>
+                <li data-target="workouts">Workouts</li>
+                <li data-target="habits-experiments">Habits & Experiments</li>
+                <li data-target="circadian">Circadian</li>
+                <li data-target="data-import">Data Import</li>
+            </ul>
+
+            <div class="data-management-sidebar">
+                <div class="status-indicator">
+                    <span class="dot active"></span>
+                    <span id="sync-time">Live Sync</span>
+                </div>
+                <div class="sidebar-upload" id="drop-zone">
+                    <span>Import Engine</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content">
+            <!-- Header -->
+            <header class="top-bar">
+                <div>
+                    <h1 class="page-title">Ready for action, Rahul</h1>
+                    <p class="page-subtitle" id="date-subtitle">March 22</p>
+                </div>
+                <div class="header-actions">
+                    <button id="sync-now-btn" class="btn-sync">Sync Now</button>
+                    <div class="user-badge">
+                        <div class="avatar"></div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Section (Bento Box) -->
+            <section id="dashboard" class="view-section active">
+                <div class="bento-grid">
+                    
+                    <!-- Readiness Score (Hero Bento) -->
+                    <div class="bento-card span-2 row-2">
+                        <h2 class="panel-title">READINESS SCORE</h2>
+                        <div class="readiness-container">
+                            <svg class="readiness-rings-svg" viewBox="0 0 100 100" style="transform: rotate(-90deg);">
+                                <circle class="readiness-ring ring-bg" cx="50" cy="50" r="40"></circle>
+                                <circle class="readiness-ring ring-recovery glow-violet" id="ring-recovery" cx="50" cy="50" r="40" stroke-dasharray="0 251.2"></circle>
+                                <circle class="readiness-ring ring-bg" cx="50" cy="50" r="30"></circle>
+                                <circle class="readiness-ring ring-strain glow-coral" id="ring-strain" cx="50" cy="50" r="30" stroke-dasharray="0 188.4"></circle>
+                            </svg>
+                            <div class="readiness-content">
+                                <div class="data-primary" id="dash-recovery-score">88</div>
+                                <div class="page-subtitle">Optimal</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Coach AI Card -->
+                    <div class="bento-card span-2 ai-coach-card">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">COACH AI</h2>
+                            <button id="refresh-ai-btn" class="btn-icon-only" title="Refresh Insight">
+                                <span class="icon-refresh">↻</span>
+                            </button>
+                        </div>
+                        <div class="ai-insight">
+                            <p id="dash-insight-text">Analyzing your health patterns...</p>
+                        </div>
+                        <div class="waveform-container active">
+                            <div class="waveform-bar"></div><div class="waveform-bar"></div><div class="waveform-bar"></div><div class="waveform-bar"></div><div class="waveform-bar"></div><div class="waveform-bar"></div><div class="waveform-bar"></div><div class="waveform-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sleep/Wake Metrics (Formerly Activity Trail space) -->
+                    <div class="bento-card span-2">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">SLEEP & WAKE VARIANCE</h2>
+                            <div class="time-range-selectors" data-stat="sleep-variance">
+                                <button class="range-btn" data-range="7">1W</button>
+                                <button class="range-btn active" data-range="30">1M</button>
+                                <button class="range-btn" data-range="365">1Y</button>
+                            </div>
+                        </div>
+                        <div class="grid-main" style="grid-template-columns: 1fr 1fr; margin-top: 1rem; gap: 1rem;">
+                            <div>
+                                <h2 class="panel-title">Avg Bedtime</h2>
+                                <div class="data-primary" style="font-size: 24px;" id="avg-bedtime">11:15 <span class="unit">PM</span></div>
+                            </div>
+                            <div>
+                                <h2 class="panel-title">Avg Wakeup</h2>
+                                <div class="data-primary" style="font-size: 24px;" id="avg-wakeup">06:45 <span class="unit">AM</span></div>
+                            </div>
+                        </div>
+                        <div class="kpi-subtext mt-4" id="sleep-variance-text">±12m consistency</div>
+                    </div>
+
+                    <!-- Mini Metrics Bento -->
+                    <div class="bento-card">
+                        <h2 class="panel-title">HRV RECOVERY</h2>
+                        <div class="data-primary" id="dash-hrv">52 <span class="unit">ms</span></div>
+                        <div class="kpi-subtext positive" id="hrv-velocity">↑ Accelerating</div>
+                    </div>
+
+                    <div class="bento-card">
+                        <h2 class="panel-title">RESTING HR</h2>
+                        <div class="data-primary" id="dash-rhr">51 <span class="unit">bpm</span></div>
+                        <div class="kpi-subtext positive" id="rhr-delta">-2 bpm drop</div>
+                    </div>
+
+                    <!-- Sleep Efficiency (NEW) -->
+                    <div class="bento-card">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">SLEEP EFFICIENCY</h2>
+                            <span class="badge-lite" id="efficiency-badge">--%</span>
+                        </div>
+                        <div class="data-primary" id="dash-efficiency">-- <span class="unit">%</span></div>
+                        <div class="kpi-subtext" id="efficiency-velocity">Stable</div>
+                    </div>
+
+                    <!-- Volume Trend (Replaces Screen Time) -->
+                    <div class="bento-card span-2">
+                        <h2 class="panel-title">WEEKLY VOLUME</h2>
+                        <div class="grid-main" style="grid-template-columns: 1fr 1fr;">
+                            <div>
+                                <div class="data-primary" style="font-size: 32px;" id="weekly-volume">420 <span class="unit">min</span></div>
+                                <div class="kpi-subtext">Active load</div>
+                            </div>
+                            <div>
+                                <h2 class="panel-title">Training Zone</h2>
+                                <div class="data-primary" style="font-size: 24px;" id="training-zone">Aerobic</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Habit Tracker Pulse Grid 2.0 -->
+                    <div class="bento-card span-4" id="habit-pulse-card">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">Habit Pulse Grid</h2>
+                            <span class="badge-lite">1-Tap Tagging</span>
+                        </div>
+                        <div class="habit-pulse-grid" id="daily-tags-container">
+                            <!-- JS will populate these bubbles -->
+                            <div class="btn-add-habit" id="add-habit-trigger">
+                                <span style="font-size: 24px;">+</span>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- Sleep & Recovery Combined Section -->
+            <section id="sleep-recovery" class="view-section">
+                <div class="bento-grid">
+                    <!-- Sleep Trend -->
+                    <div class="bento-card span-full">
+                         <div class="card-header-flex">
+                             <h2 class="panel-title">SLEEP TREND</h2>
+                             <div class="time-range-selectors" data-chart="sleep-recovery">
+                                 <button class="range-btn" data-range="1w">1W</button>
+                                 <button class="range-btn" data-range="1m">1M</button>
+                                 <button class="range-btn" data-range="3m">3M</button>
+                                 <button class="range-btn active" data-range="1y">1Y</button>
+                                 <button class="range-btn" data-range="all">ALL</button>
+                             </div>
+                         </div>
+                         <div class="chart-container-lg" style="height: 350px;">
+                            <canvas id="sleepTrendChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Sleep & Wake Schedule (NEW) -->
+                    <div class="bento-card span-full">
+                         <h2 class="panel-title">SLEEP & WAKE SCHEDULE</h2>
+                         <div class="chart-container-lg" style="height: 350px;">
+                            <canvas id="sleepScheduleChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- HRV Trend -->
+                    <div class="bento-card span-full">
+                         <h2 class="panel-title">HRV RECOVERY TREND</h2>
+                         <div class="chart-container-lg">
+                            <canvas id="hrvChartOnly"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Dual-Layer AI Insights -->
+                    <div class="grid-main" style="grid-template-columns: 1fr 1fr; gap: 1.5rem; width: 100%; margin-top: 1.5rem;">
+                        <!-- Box 1: Short-term (Weekly Readiness) -->
+                        <div class="bento-card ai-insight-panel short-term">
+                            <div class="card-header-flex">
+                                <h2 class="panel-title">WEEKLY READINESS</h2>
+                                <span class="badge-lite">7-Day Snapshot</span>
+                            </div>
+                            <div class="ai-content-box" style="min-height: 120px;">
+                                <p id="sleep-short-term-insight" class="insight-text">Comparing last night's data to your weekly average...</p>
+                            </div>
+                        </div>
+
+                        <!-- Box 2: Long-term (Historical Synthesis) -->
+                        <div class="bento-card ai-insight-panel long-term">
+                            <div class="card-header-flex">
+                                <h2 class="panel-title">HISTORICAL SYNTHESIS</h2>
+                                <span class="badge-lite">Full Dataset Analysis</span>
+                            </div>
+                            <div class="ai-content-box" style="min-height: 120px;">
+                                <p id="sleep-long-term-insight" class="insight-text">Analyzing long-term sleep architecture and biometric correlations...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Resting HR Section -->
+            <!-- Workouts Section -->
+            <section id="workouts" class="view-section">
+                <!-- AI Coach Banner -->
+                <div class="bento-card span-full" style="background: linear-gradient(145deg, rgba(30,32,45,0.7), rgba(15,17,25,0.9)); border-left: 4px solid var(--accent-1);">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <h2 class="panel-title" style="margin-bottom: 4px; color: var(--accent-1);">DYNAMIC READINESS COACH</h2>
+                            <div class="data-primary" style="font-size: 20px; color: var(--text-base);" id="workout-ai-advice">Analyzing nervous system capacity...</div>
+                        </div>
+                        <span style="font-size: 32px;" id="workout-ai-emoji">🧠</span>
+                    </div>
+                </div>
+
+                <div class="bento-grid">
+                    <!-- Volume Analysis with Time Toggle -->
+                    <div class="bento-card span-full">
+                        <div class="card-header-flex">
+                             <h2 class="panel-title">INTENSITY DISTRIBUTION (80/20)</h2>
+                             <div class="time-range-selectors" data-chart="workouts">
+                                 <button class="range-btn" data-range="1w">1W</button>
+                                 <button class="range-btn" data-range="1m">1M</button>
+                                 <button class="range-btn active" data-range="3m">3M</button>
+                                 <button class="range-btn" data-range="1y">1Y</button>
+                                 <button class="range-btn" data-range="all">ALL</button>
+                             </div>
+                         </div>
+                         <div class="chart-container-lg" style="height: 350px;">
+                            <canvas id="workoutDistributionChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Momentum Grid Heatmap -->
+                    <div class="bento-card span-full" style="padding-bottom: 32px;">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">MOMENTUM & STREAKS (90 DAYS)</h2>
+                        </div>
+                        <div style="display: flex; gap: 4px; overflow-x: auto; padding-top: 10px; padding-bottom: 4px;" id="workout-momentum-grid">
+                            <!-- JS fills with heatmap blocks -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Habits & Experiments Section -->
+            <section id="habits-experiments" class="view-section">
+                <div class="bento-grid">
+                    <!-- Top Row: Heatmap Calendar -->
+                    <div class="bento-card span-full" style="min-height: 250px;">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">HABIT CONSISTENCY CALENDAR</h2>
+                            <div class="calendar-controls">
+                                <button id="cal-prev" class="btn-icon-only">←</button>
+                                <span id="cal-month-label" style="font-weight: 600; color: white;">March 2024</span>
+                                <button id="cal-next" class="btn-icon-only">→</button>
+                            </div>
+                        </div>
+                        <!-- Habit legend (color dots) -->
+                        <div id="habits-legend" class="habits-legend">
+                            <!-- JS will populate -->
+                        </div>
+                        <div id="habits-calendar-grid" class="habits-calendar-grid">
+                            <!-- JS will populate -->
+                        </div>
+                    </div>
+
+                    <!-- Middle Row: Pulse Grid (Enhanced) -->
+                    <div class="bento-card span-full">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">Habit Pulse Grid</h2>
+                            <div style="display: flex; align-items: center; gap: 1rem;">
+                                <button id="yesterday-btn" class="yesterday-link">← Yesterday</button>
+                                <span class="badge-lite" id="pulse-date-label">Today</span>
+                            </div>
+                        </div>
+                        <div class="habit-pulse-grid expanded" id="habits-tab-container">
+                            <!-- JS will populate -->
+                        </div>
+                    </div>
+
+                    <!-- Streaks Bar -->
+                    <div class="bento-card span-full">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">HABIT STREAKS</h2>
+                            <span class="badge-lite">Current Run</span>
+                        </div>
+                        <div id="habits-streaks-bar" class="habits-streaks-bar">
+                            <!-- JS will populate -->
+                        </div>
+                    </div>
+
+                    <!-- Bottom Row: Habit Impact Matrix -->
+                    <div class="bento-card span-full">
+                        <div class="card-header-flex">
+                            <h2 class="panel-title">HABIT IMPACT MATRIX</h2>
+                            <label class="lag-toggle" title="Calculates effects on the biometrics for the day after the habit">
+                                <input type="checkbox" id="lag-toggle-cb" checked>
+                                <span class="lag-toggle-label">Next-day Effect</span>
+                            </label>
+                        </div>
+                        <p class="kpi-subtext">Select a habit to see its exact mathematical dividend or tax on your core biometrics.</p>
+                        
+                        <div class="mt-4" style="display:flex; justify-content:center; align-items:center; gap:1rem;">
+                            <span style="color:var(--color-text-secondary);">Analyze Habit:</span>
+                            <select id="habit-impact-select" class="neon-select" style="background:var(--color-bg-void); color:white; border: 1px solid var(--color-border-card); padding: 0.5rem 1rem; border-radius: 8px; min-width: 200px; font-weight: 500;"></select>
+                        </div>
+
+                        <div id="habit-impact-results" class="grid-main mt-4 hidden" style="grid-template-columns: repeat(4, 1fr); gap: 1rem;">
+                            <div class="bento-card" style="background: rgba(255,255,255,0.02); padding: 1.5rem 1rem; text-align: center;">
+                                <div class="kpi-subtext">HRV Impact</div>
+                                <div id="impact-hrv" class="data-primary" style="font-size: 1.8rem; margin:0.5rem 0;">--</div>
+                                <div class="badge-lite" style="background: transparent; color: var(--color-text-secondary); width: auto;" id="impact-hrv-raw">-- vs --</div>
+                            </div>
+                            <div class="bento-card" style="background: rgba(255,255,255,0.02); padding: 1.5rem 1rem; text-align: center;">
+                                <div class="kpi-subtext">RHR Impact</div>
+                                <div id="impact-rhr" class="data-primary" style="font-size: 1.8rem; margin:0.5rem 0;">--</div>
+                                <div class="badge-lite" style="background: transparent; color: var(--color-text-secondary); width: auto;" id="impact-rhr-raw">-- vs --</div>
+                            </div>
+                            <div class="bento-card" style="background: rgba(255,255,255,0.02); padding: 1.5rem 1rem; text-align: center;">
+                                <div class="kpi-subtext">Sleep Efficiency</div>
+                                <div id="impact-efficiency" class="data-primary" style="font-size: 1.8rem; margin:0.5rem 0;">--</div>
+                                <div class="badge-lite" style="background: transparent; color: var(--color-text-secondary); width: auto;" id="impact-efficiency-raw">-- vs --</div>
+                            </div>
+                            <div class="bento-card" style="background: rgba(255,255,255,0.02); padding: 1.5rem 1rem; text-align: center;">
+                                <div class="kpi-subtext">Deep Sleep</div>
+                                <div id="impact-deep" class="data-primary" style="font-size: 1.8rem; margin:0.5rem 0;">--</div>
+                                <div class="badge-lite" style="background: transparent; color: var(--color-text-secondary); width: auto;" id="impact-deep-raw">-- vs --</div>
+                            </div>
+                        </div>
+                        <div id="habit-impact-empty" class="mt-4" style="text-align:center; padding: 3rem 1rem;">
+                            <div style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.8;">🧪</div>
+                            <div class="kpi-subtext">Select a habit from the dropdown above.<br>The engine requires at least <strong>4 logged instances</strong> of a habit to compute statistical significance.</div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- Circadian Section -->
+            <section id="circadian" class="view-section">
+                <div class="bento-grid">
+                    <div class="bento-card span-full">
+                         <h2 class="panel-title">CIRCADIAN ESTIMATE</h2>
+                         <div class="chart-container-lg">
+                            <canvas id="circadianChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- Data Import Section -->
+            <section id="data-import" class="view-section">
+                <div class="bento-card span-full">
+                    <h2 class="panel-title">DATA IMPORT</h2>
+                    <div id="import-status" class="import-status-box hidden">
+                        <p id="import-status-text" class="import-status-text">Processing...</p>
+                    </div>
+                    <div class="large-drop-zone" id="large-drop-zone">
+                        <div class="drop-text">
+                            <h4>Drop your export.xml here</h4>
+                            <p>or click to select file from your computer</p>
+                        </div>
+                        <button class="btn-primary" id="browse-btn">Browse Files</button>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+        <!-- Floating Action Button (FAB) -->
+        <button id="fab-quick-log" class="fab-btn" onclick="toggleQuickLogModal(true)">
+            <span class="fab-icon">+</span>
+        </button>
+
+        <!-- Quick Log Modal Overlay -->
+        <div id="quick-log-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Quick Log Habit</h3>
+                    <button class="btn-close" onclick="toggleQuickLogModal(false)">✕</button>
+                </div>
+                
+                <div class="modal-toggle-group">
+                    <button class="toggle-btn active" id="ql-toggle-today" onclick="setQuickLogDay('today')">Today</button>
+                    <button class="toggle-btn" id="ql-toggle-yesterday" onclick="setQuickLogDay('yesterday')">Yesterday</button>
+                </div>
+                
+                <p class="kpi-subtext" style="margin-bottom: 1.5rem; text-align: center;">Tap a habit to instantly log it for <span id="ql-target-label" style="color:var(--color-text-primary); font-weight:600;">Today</span>.</p>
+                
+                <div id="ql-tags-grid" class="ql-tags-grid">
+                    <!-- Populated via JS -->
+                </div>
+                
+                <div id="ql-success-msg" class="kpi-subtext positive hidden" style="text-align:center; margin-top: 1rem; font-weight: 500;">
+                    ✓ Saved to timeline
+                </div>
+            </div>
+        </div>
+
+    </div>
+    
+    <script src="parser.js?v=4"></script>
+    <script src="app.js?v=4"></script>
+</body>
+</html>
