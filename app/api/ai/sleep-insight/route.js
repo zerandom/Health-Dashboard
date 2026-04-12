@@ -3,14 +3,13 @@ import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
 
-const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-
 // GET /api/ai/sleep-insight — dual-layer sleep & recovery analysis
 export async function GET() {
+  const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  if (!GOOGLE_API_KEY || GOOGLE_API_KEY === 'your_gemini_api_key_here') {
+  if (!GOOGLE_API_KEY || GOOGLE_API_KEY === 'your_gemini_api_key_here' || GOOGLE_API_KEY.length < 10) {
     return NextResponse.json({ insight: 'API Key Required.' });
   }
 
