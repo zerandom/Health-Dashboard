@@ -50,7 +50,7 @@ DATA:
 ${summary}`;
 
   const cleanKey = (GOOGLE_API_KEY || '').trim().replace(/[\s"']/g, '');
-  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest'];
   let insight = null;
   let lastError = null;
 
