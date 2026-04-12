@@ -247,24 +247,47 @@ export default function DashboardClient({ user }) {
                 </div>
               </div>
 
-              <div className="grid-main" style={{ gridTemplateColumns: '1fr 1fr', gap: '1.5rem', width: '100%', marginTop: '1.5rem' }}>
-                <div className="bento-card ai-insight-panel short-term">
-                  <div className="card-header-flex">
-                    <h2 className="panel-title">WEEKLY READINESS</h2>
-                    <span className="badge-lite">7-Day Snapshot</span>
+              <div className="insight-bridge-layout">
+                {/* Weekly Readiness (Short-term) */}
+                <div className="ai-insight-panel short-term">
+                  <div className="ai-panel-header">
+                    <div className="ai-header-left">
+                      <div className="ai-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                        </svg>
+                      </div>
+                      <h2 className="panel-title">WEEKLY READINESS</h2>
+                    </div>
+                    <div className="ai-writing-indicator">
+                      <div className="ai-dot pulse"></div>
+                      <span className="badge-lite">Live Analysis</span>
+                    </div>
                   </div>
-                  <div className="ai-content-box" style={{ minHeight: '120px' }}>
-                    <p id="sleep-short-term-insight" className="insight-text">Comparing last night&apos;s data to your weekly average...</p>
-                  </div>
+                  <p id="sleep-short-term-insight" className="insight-text" style={{ fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.9 }}>
+                    Comparing last night&apos;s data to your weekly average...
+                  </p>
                 </div>
-                <div className="bento-card ai-insight-panel long-term">
-                  <div className="card-header-flex">
-                    <h2 className="panel-title">HISTORICAL SYNTHESIS</h2>
-                    <span className="badge-lite">Full Dataset Analysis</span>
+
+                {/* Historical Synthesis (Long-term) */}
+                <div className="ai-insight-panel long-term">
+                  <div className="ai-panel-header">
+                    <div className="ai-header-left">
+                      <div className="ai-icon-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                          <path d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <h2 className="panel-title">HISTORICAL SYNTHESIS</h2>
+                    </div>
+                    <div className="ai-writing-indicator">
+                      <div className="ai-dot pulse" style={{ animationDelay: '0.2s' }}></div>
+                      <span className="badge-lite">Deep Context</span>
+                    </div>
                   </div>
-                  <div className="ai-content-box" style={{ minHeight: '120px' }}>
-                    <p id="sleep-long-term-insight" className="insight-text">Analyzing long-term sleep architecture...</p>
-                  </div>
+                  <p id="sleep-long-term-insight" className="insight-text" style={{ fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.9 }}>
+                    Analyzing long-term sleep architecture...
+                  </p>
                 </div>
               </div>
             </div>
