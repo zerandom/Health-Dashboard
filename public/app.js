@@ -1,6 +1,13 @@
 // Ekatra — Personal Health Intelligence | Core Application Logic
 // Data priority: 1. Server-parsed XML  2. Live sync (iOS Shortcut)  3. Demo
 
+// Trusted Types fallback for innerHTML
+if (window.trustedTypes && trustedTypes.createPolicy && !trustedTypes.defaultPolicy) {
+    trustedTypes.createPolicy('default', {
+        createHTML: (string) => string
+    });
+}
+
 // ── 1. Global State ──────────────────────────────────────────────────────────
 const state = {
     isDemo: true,
@@ -59,7 +66,11 @@ console.log('[App] Script parsed and executing top-level scope.');
 let charts = {};
 
 // ── 2. Initialization ─────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', async () => {
+window.initLegacyApp = async () => {
+    // Prevent double execution
+    if (window._appInitialized) return;
+    window._appInitialized = true;
+
     initNavigation();
     initUploadZone();
     initSyncButton();
@@ -68,8 +79,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     initAIInsightControl();
 
     // Set today's date in header
-    document.getElementById('date-subtitle').innerText =
-        new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+    const dateSubtitle = document.getElementById('date-subtitle');
+    if (dateSubtitle) {
+        dateSubtitle.innerText = new Date().toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+    }
 
     // Priority chain: XML data → live sync → demo
     const loaded = await loadDataWithPriority();
@@ -85,7 +98,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadTagsFromServer();
 
     updateUI();
-});
+};
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', window.initLegacyApp);
+} else {
+    // Timeout gives Next.js a tick to ensure DOM hydration completes
+    setTimeout(window.initLegacyApp, 100);
+}
 
 // ── 3. Data Loading Priority Chain ───────────────────────────────────────────
 async function loadDataWithPriority() {
@@ -93,7 +113,17 @@ async function loadDataWithPriority() {
     try {
         const res  = await fetch('/api/data');
         const json = await res.json();
-        if (json.dataSource && json.dataSource !== 'none' && json.dates && json.dates.length > 0) {
+        
+        // Handle gracefully if json is already pre-parsed (new stream parser) vs raw (legacy)
+        if (json._source && json.dates && json.dates.length > 0) {
+            state.data = json;
+            state.isDemo = false;
+            const days = json.dates.length;
+            const src  = json._source === 'xml_browser_stream' ? 'XML Export' : json._source;
+            setStatusBadge(`${src} · ${days} days`, true);
+            await overlayLiveSync();
+            return true;
+        } else if (json.dataSource && json.dataSource !== 'none' && json.dates && json.dates.length > 0) {
             const parsed = HealthParser.buildFromServerParsed(json);
             if (parsed) {
                 state.data   = parsed;
@@ -334,95 +364,47 @@ async function handleXmlUpload(file) {
         statusBox.classList.remove('hidden');
     }
 
-    if (statusText) statusText.innerText = `Reading ${file.name}...`;
+    if (statusText) statusText.innerText = `Stream parsing ${file.name} locally...`;
 
     try {
-        if (statusText) statusText.innerText = 'Uploading to server for fast parsing...';
-        
-        // Stream file directly to server (avoids browser OOM on massive files)
-        const res = await fetch('/api/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/xml' },
-            body: file,
+        const parsed = await HealthParser.streamParseXML(file, (loaded, total) => {
+            const percent = ((loaded / total) * 100).toFixed(1);
+            if (statusText) statusText.innerText = `Crunching data: ${percent}% (Never leaves your browser)`;
         });
         
-        const json = await res.json();
+        if (statusText) statusText.innerText = 'XML parsed! Securing your health data to your cloud account...';
         
-        if (json.status === 'processing' || json.status === 'success') {
-            if (statusText) statusText.innerText = 'Server processing. Waiting for results...';
-            
-            // Start polling for completion
-            pollUploadStatus();
+        // Post the ~3MB parsed JSON directly to Supabase via our Next.js API
+        const res = await fetch('/api/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(parsed)
+        });
+
+        if (!res.ok) {
+            const errorText = await res.text();
+            throw new Error(`Cloud save failed (HTTP ${res.status}): ${errorText.substring(0, 150)}`);
+        }
+
+        if (parsed && parsed.dates.length > 0) {
+            state.data   = parsed;
+            state.isDemo = false;
+            setStatusBadge(`Live (${parsed.dates.length} days)`, true);
+            if (statusText) statusText.innerText = `Success! Discovered ${parsed.dates.length} days of health history.`;
+            setTimeout(() => {
+                if (statusBox) statusBox.classList.add('hidden');
+                updateUI();
+                const dashboardNav = document.querySelector('.nav-links li[data-target="dashboard"]');
+                if (dashboardNav) dashboardNav.click();
+            }, 1500);
         } else {
-            throw new Error(json.message || 'Server parse error');
+            throw new Error('No valid Apple Health events found in XML');
         }
     } catch (err) {
-        console.warn('[App] Server error or busy — falling back to browser-side parsing.', err);
-        
-        const sizeMB = file.size / (1024 * 1024);
-        if (sizeMB > 200) {
-            if (statusText) statusText.innerText = `File is too large (${sizeMB.toFixed(1)} MB) to parse in the browser. Please ensure the server is running.`;
-            alert(`Failed: ${sizeMB.toFixed(1)} MB is too large for browser parsing. Ensure server.py is running.`);
-            return;
-        }
-
-        if (statusText) statusText.innerText = 'Server busy. Parsing locally in browser (may take a moment)...';
-        
-        try {
-            const text   = await file.text();
-            const xmlData = HealthParser.parseXML(text);
-            const parsed   = HealthParser.buildFromServerParsed(xmlData);
-            
-            if (parsed && parsed.dates.length > 0) {
-                state.data   = parsed;
-                state.isDemo = false;
-                setStatusBadge(`XML (${parsed.dates.length} days)`, true);
-                if (statusText) statusText.innerText = `Success! Imported ${parsed.dates.length} days locally.`;
-                setTimeout(() => {
-                    if (statusBox) statusBox.classList.add('hidden');
-                    updateUI();
-                    const dashboardNav = document.querySelector('.nav-links li[data-target="dashboard"]');
-                    if (dashboardNav) dashboardNav.click();
-                }, 1500);
-            } else {
-                throw new Error('No valid data found in XML');
-            }
-        } catch (localErr) {
-            console.error('[App] Browser parse failure:', localErr);
-            if (statusText) statusText.innerText = `Import failed: ${localErr.message}`;
-            alert(`Failed to parse XML: ${localErr.message}`);
-        }
+        console.error('[App] Browser parse failure:', err);
+        if (statusText) statusText.innerText = `Import failed: ${err.message}`;
+        alert(`Failed to import data: ${err.message}`);
     }
-}
-
-async function pollUploadStatus() {
-    const statusText = document.getElementById('import-status-text');
-    let attempts = 0;
-    const maxAttempts = 120; // 2 minutes
-
-    const timer = setInterval(async () => {
-        attempts++;
-        try {
-            const res = await fetch('/api/upload/status');
-            const status = await res.json();
-
-            if (status.status === 'success') {
-                clearInterval(timer);
-                if (statusText) statusText.innerText = `Success! Parsed ${status.days} days in ${status.elapsed}s. Refreshing...`;
-                setTimeout(() => window.location.reload(), 2000);
-            } else if (status.status === 'error') {
-                clearInterval(timer);
-                if (statusText) statusText.innerText = `Error: ${status.message}`;
-            } else if (attempts >= maxAttempts) {
-                clearInterval(timer);
-                if (statusText) statusText.innerText = 'Timeout: Server took too long to parse.';
-            } else {
-                if (statusText) statusText.innerText = `Processing... ${status.message || ''}`;
-            }
-        } catch (e) {
-            console.warn('Poll error:', e);
-        }
-    }, 1500);
 }
 
 // ── 7. iOS Sync Button ────────────────────────────────────────────────────────
@@ -1285,29 +1267,35 @@ function renderCharts(sectionId) {
     const r = state.data;
     if (!r) return;
 
-    switch (sectionId) {
-        case 'dashboard':
-            renderSleepStagesChart(r);
-            renderRecoveryTrendChart(r);
-            break;
-        case 'sleep-recovery':       
-            const range = state.chartRanges['sleep-recovery'] || 365;
-            renderSleepTrendChart(range);
-            renderHrvChartOnly(range);
-            renderSleepScheduleChart(range); // New
-            fetchCombinedAIInsight();
-            break;
-        case 'workouts':    
-            const wRange = state.chartRanges.workouts || 90;
-            renderWorkoutDistributionChart(wRange);            
-            updateWorkoutAICoach();
-            renderWorkoutMomentumHeatmap();
-            break;
-        case 'circadian':   renderCircadianChart23h();   break;
-        case 'habits-experiments':
-            renderCorrelatorChart('habitsCorrelatorChart', 'habits-corr-metric-1', 'habits-corr-metric-2');
-            break;
-        case 'correlator':  renderCorrelatorChart();      break;
+    if (sectionId === 'dashboard') {
+        renderSleepStagesChart(r);
+        renderRecoveryTrendChart(r);
+
+    } else if (sectionId === 'sleep-recovery') {
+        // state.chartRanges uses 'sleep' as the key from the time-range selectors
+        const range = state.chartRanges['sleep'] || state.chartRanges['sleep-recovery'] || 365;
+        renderSleepTrendChart(range);
+        renderHrvChartOnly(range);
+        renderRhrChartOnly(range);
+        renderSleepScheduleChart(range);
+        // Reset lock so AI updates on every visit to the tab
+        state.combinedAiLoaded = false;
+        fetchCombinedAIInsight();
+
+    } else if (sectionId === 'workouts') {
+        const wRange = state.chartRanges.workouts || 90;
+        renderWorkoutDistributionChart(wRange);
+        updateWorkoutAICoach();
+        renderWorkoutMomentumHeatmap();
+
+    } else if (sectionId === 'circadian') {
+        renderCircadianChart23h();
+
+    } else if (sectionId === 'habits-experiments') {
+        renderCorrelatorChart('habitsCorrelatorChart', 'habits-corr-metric-1', 'habits-corr-metric-2');
+
+    } else if (sectionId === 'correlator') {
+        renderCorrelatorChart();
     }
 }
 
@@ -1592,9 +1580,15 @@ function renderSleepScheduleChart(days = 365) {
     const d = state.data;
     if (!d || !d.sleepBedtimes) return;
 
-    const labels = _slice(d.dates, days);
+    // Use rawDates for ISO date math where available, fall back to display dates
+    const dateKeys = d.rawDates || d.dates;
     const bedtimes = _slice(d.sleepBedtimes, days);
     const wakeups = _slice(d.sleepWakeups, days);
+    const labels = _slice(dateKeys, days).map((d, i) => {
+        const displayDates = state.data.dates;
+        const startIdx = Math.max(0, displayDates.length - days);
+        return displayDates[startIdx + i] || d;
+    });
 
     const chartData = bedtimes.map((bt, i) => {
         const start = bt ? parseTimeToMins(bt, true) : null;
@@ -1841,7 +1835,9 @@ function renderWorkoutMomentumHeatmap() {
             outline = '1px solid rgba(6, 214, 160, 0.5)';
         }
 
-        const dateLabel = new Date(d.dates[i]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        // Use rawDates (ISO strings) for date math, fall back to display dates
+        const isoDate = d.rawDates ? d.rawDates[i] : d.dates[i];
+        const dateLabel = new Date(isoDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         
         html += `<div 
             style="min-width: 16px; height: 32px; background: ${color}; border-radius: 4px; border: ${outline}; cursor: pointer; transition: transform 0.1s; position:relative;"

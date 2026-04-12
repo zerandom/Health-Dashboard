@@ -1,0 +1,1 @@
+insert or update on table "health_data" violates foreign key constraint "health_data_user_email_fkey"

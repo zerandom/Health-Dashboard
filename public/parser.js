@@ -225,81 +225,202 @@ class HealthParser {
         };
     }
 
-    // ── 3. Parse raw Apple Health XML in browser ───────────────────────────────
-    // Fallback when server-side parse fails or file is dropped without a server.
-    static parseXML(xmlString) {
-        console.log('[Parser] Parsing XML in browser…');
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(xmlString, 'text/xml'); // ← was parseString (bug)
+    // ── 3. Parse raw Apple Health XML in browser (Streaming/Regex) ─────────────
+    // Efficiently stream-parses multi-gigabyte XML files without blowing up DOM memory.
+    static async streamParseXML(file, onProgress) {
+        return new Promise((resolve, reject) => {
+            console.log('[Parser] Stream parsing huge XML:', file.size, 'bytes');
+            const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+            const fileSize = file.size;
+            let offset = 0;
+            
+            const hrvByDate   = {};
+            const rhrByDate   = {};
+            const sleepByDate = {};
+            const wByDate     = {};
+            const detailedWByDate = {};
+            const sleepBedtimesByDate = {};
+            const sleepWakeupsByDate = {};
+            const sleepInBedByDate = {};
 
-        if (xmlDoc.querySelector('parsererror')) {
-            console.error('[Parser] XML parse error');
-            return null;
-        }
+            const DEEP_VAL  = 'HKCategoryValueSleepAnalysisAsleepDeep';
+            const REM_VAL   = 'HKCategoryValueSleepAnalysisAsleepREM';
+            const CORE_VALS = new Set([
+                'HKCategoryValueSleepAnalysisAsleepCore',
+                'HKCategoryValueSleepAnalysisAsleepUnspecified',
+                'HKCategoryValueSleepAnalysisAsleep',
+            ]);
 
-        const records  = xmlDoc.getElementsByTagName('Record');
-        const workouts = xmlDoc.getElementsByTagName('Workout');
+            const recordRegex = /<(Record|Workout)[^>]+>/g;
+            const typeRegex = /type="([^"]+)"/;
+            const startRegex = /startDate="([^"]+)"/;
+            const endRegex = /endDate="([^"]+)"/;
+            const valRegex = /value="([^"]+)"/;
+            const durRegex = /duration="([^"]+)"/;
+            const wTypeRegex = /workoutActivityType="([^"]+)"/;
 
-        const hrvByDate   = {};
-        const rhrByDate   = {};
-        const sleepByDate = {};
-        const wByDate     = {};
+            let tail = '';
+            const reader = new FileReader();
 
-        const DEEP_VAL  = 'HKCategoryValueSleepAnalysisAsleepDeep';
-        const REM_VAL   = 'HKCategoryValueSleepAnalysisAsleepREM';
-        const CORE_VALS = new Set([
-            'HKCategoryValueSleepAnalysisAsleepCore',
-            'HKCategoryValueSleepAnalysisAsleepUnspecified',
-            'HKCategoryValueSleepAnalysisAsleep',
-        ]);
+            const getLogicalDate = (dateStr) => {
+                const d = new Date(dateStr);
+                d.setHours(d.getHours() - 12);
+                return d.toISOString().slice(0, 10);
+            };
 
-        for (let r of records) {
-            const type  = r.getAttribute('type');
-            const start = r.getAttribute('startDate') || '';
-            const date  = start.slice(0, 10);
-            if (!date) continue;
+            reader.onload = function(e) {
+                if (onProgress) onProgress(offset, fileSize);
 
-            if (type === 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN') {
-                (hrvByDate[date] = hrvByDate[date] || []).push(+r.getAttribute('value'));
-            } else if (type === 'HKQuantityTypeIdentifierRestingHeartRate') {
-                (rhrByDate[date] = rhrByDate[date] || []).push(+r.getAttribute('value'));
-            } else if (type === 'HKCategoryTypeIdentifierSleepAnalysis') {
-                const val    = r.getAttribute('value') || '';
-                const end    = r.getAttribute('endDate') || '';
-                const mins   = (new Date(end) - new Date(start)) / 60000;
-                if (!sleepByDate[date]) sleepByDate[date] = { deep: 0, rem: 0, core: 0 };
-                if (val === DEEP_VAL)      sleepByDate[date].deep += mins;
-                else if (val === REM_VAL)  sleepByDate[date].rem  += mins;
-                else if (CORE_VALS.has(val)) sleepByDate[date].core += mins;
+                const chunk = tail + e.target.result;
+                const lastBoundary = Math.max(chunk.lastIndexOf('\\n'), chunk.lastIndexOf('>'));
+                
+                let processable = chunk;
+                if (lastBoundary !== -1 && lastBoundary < chunk.length - 1) {
+                    processable = chunk.substring(0, lastBoundary + 1);
+                    tail = chunk.substring(lastBoundary + 1);
+                } else {
+                    processable = chunk;
+                    tail = '';
+                }
+
+                let match;
+                while ((match = recordRegex.exec(processable)) !== null) {
+                    const tagContent = match[0];
+                    const isWorkout = match[1] === 'Workout';
+                    
+                    const startMatch = startRegex.exec(tagContent);
+                    if (!startMatch) continue;
+                    const fullDateStr = startMatch[1];
+                    const date = fullDateStr.slice(0, 10);
+                    if (!date) continue;
+
+                    if (isWorkout) {
+                        const durMatch = durRegex.exec(tagContent);
+                        if (durMatch) {
+                            const dur = parseFloat(durMatch[1] || 0);
+                            wByDate[date] = (wByDate[date] || 0) + dur;
+                            
+                            const wtMatch = wTypeRegex.exec(tagContent);
+                            let t = wtMatch ? wtMatch[1] : 'Other';
+                            t = t.replace('HKWorkoutActivityType', '');
+                            if (!detailedWByDate[date]) detailedWByDate[date] = [];
+                            detailedWByDate[date].push({ type: t, duration: dur, date: fullDateStr });
+                        }
+                    } else {
+                        const typeMatch = typeRegex.exec(tagContent);
+                        if (!typeMatch) continue;
+                        const type = typeMatch[1];
+                        
+                        if (type === 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN') {
+                            const valMatch = valRegex.exec(tagContent);
+                            if (valMatch) (hrvByDate[date] = hrvByDate[date] || []).push(parseFloat(valMatch[1]));
+                        } else if (type === 'HKQuantityTypeIdentifierRestingHeartRate') {
+                            const valMatch = valRegex.exec(tagContent);
+                            if (valMatch) (rhrByDate[date] = rhrByDate[date] || []).push(parseFloat(valMatch[1]));
+                        } else if (type === 'HKCategoryTypeIdentifierSleepAnalysis') {
+                            const valMatch = valRegex.exec(tagContent);
+                            const endMatch = endRegex.exec(tagContent);
+                            if (valMatch && endMatch) {
+                                const endStr = endMatch[1];
+                                const val = valMatch[1];
+                                const mins = (new Date(endStr) - new Date(fullDateStr)) / 60000;
+                                const lDate = getLogicalDate(fullDateStr);
+                                
+                                if (mins > 0) {
+                                    if (!sleepByDate[lDate]) sleepByDate[lDate] = { deep: 0, rem: 0, core: 0 };
+                                    if (val === DEEP_VAL) sleepByDate[lDate].deep += mins;
+                                    else if (val === REM_VAL) sleepByDate[lDate].rem += mins;
+                                    else if (CORE_VALS.has(val)) sleepByDate[lDate].core += mins;
+                                    else if (val === 'HKCategoryValueSleepAnalysisInBed') {
+                                        sleepInBedByDate[lDate] = (sleepInBedByDate[lDate] || 0) + mins;
+                                        if (!sleepBedtimesByDate[lDate] || new Date(fullDateStr) < new Date(sleepBedtimesByDate[lDate])) {
+                                            sleepBedtimesByDate[lDate] = fullDateStr;
+                                        }
+                                        if (!sleepWakeupsByDate[lDate] || new Date(endStr) > new Date(sleepWakeupsByDate[lDate])) {
+                                            sleepWakeupsByDate[lDate] = endStr;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                offset += CHUNK_SIZE;
+                if (offset < fileSize) {
+                    readNextChunk();
+                } else {
+                    finishParsing();
+                }
+            };
+
+            reader.onerror = function() {
+                reject(new Error("File reading failed"));
+            };
+
+            function readNextChunk() {
+                const slice = file.slice(offset, offset + CHUNK_SIZE);
+                reader.readAsText(slice);
             }
-        }
 
-        for (let w of workouts) {
-            const start = w.getAttribute('startDate') || '';
-            const date  = start.slice(0, 10);
-            if (date) wByDate[date] = (wByDate[date] || 0) + (+w.getAttribute('duration') || 0);
-        }
+            function finishParsing() {
+                if (onProgress) onProgress(fileSize, fileSize); // 100%
+                let allDates = [...new Set([
+                    ...Object.keys(hrvByDate),
+                    ...Object.keys(rhrByDate),
+                    ...Object.keys(sleepByDate),
+                    ...Object.keys(sleepInBedByDate),
+                    ...Object.keys(wByDate)
+                ])].sort(); // Load ALL historical data
 
-        const allDates = [...new Set([
-            ...Object.keys(hrvByDate),
-            ...Object.keys(rhrByDate),
-            ...Object.keys(sleepByDate),
-        ])].sort().slice(-365);
+                // We anchor the "real" start date to the first date where hardware wearables (HRV/RHR/Sleep) 
+                // began recording consistently (e.g., at least 5 logs within a 14-day window).
+                let firstHardwareIdx = 0;
+                let foundHardware = false;
+                
+                for (let i = 0; i < allDates.length; i++) {
+                    let hardwareCount = 0;
+                    for (let j = 0; j < 14 && (i + j) < allDates.length; j++) {
+                        const d = allDates[i + j];
+                        if (hrvByDate[d] || rhrByDate[d] || sleepByDate[d]) {
+                            hardwareCount++;
+                        }
+                    }
+                    if (hardwareCount >= 5) { // Needs dense enough data to be "ownership"
+                        firstHardwareIdx = i;
+                        foundHardware = true;
+                        break;
+                    }
+                }
+                
+                if (foundHardware && firstHardwareIdx > 0) {
+                    allDates = allDates.slice(firstHardwareIdx);
+                }
 
-        const avg = arr => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : null;
+                const avg = arr => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : null;
 
-        const raw = {
-            dataSource: 'xml_browser',
-            dates:          allDates,
-            hrv:            allDates.map(d => avg(hrvByDate[d]  || [])),
-            rhr:            allDates.map(d => avg(rhrByDate[d]  || [])),
-            sleepDeep:      allDates.map(d => +(sleepByDate[d]?.deep || 0).toFixed(1)),
-            sleepREM:       allDates.map(d => +(sleepByDate[d]?.rem  || 0).toFixed(1)),
-            sleepCore:      allDates.map(d => +(sleepByDate[d]?.core || 0).toFixed(1)),
-            workoutMinutes: allDates.map(d => +(wByDate[d] || 0).toFixed(1)),
-        };
+                const raw = {
+                    dataSource: 'xml_browser_stream',
+                    dates:          allDates,
+                    hrv:            allDates.map(d => avg(hrvByDate[d]  || [])),
+                    rhr:            allDates.map(d => avg(rhrByDate[d]  || [])),
+                    sleepDeep:      allDates.map(d => +(sleepByDate[d]?.deep || 0).toFixed(1)),
+                    sleepREM:       allDates.map(d => +(sleepByDate[d]?.rem  || 0).toFixed(1)),
+                    sleepCore:      allDates.map(d => +(sleepByDate[d]?.core || 0).toFixed(1)),
+                    sleepInBedMins: allDates.map(d => +(sleepInBedByDate[d] || 0).toFixed(1)),
+                    sleepBedtimes:  allDates.map(d => sleepBedtimesByDate[d] || null),
+                    sleepWakeups:   allDates.map(d => sleepWakeupsByDate[d] || null),
+                    workoutMinutes: allDates.map(d => +(wByDate[d] || 0).toFixed(1)),
+                    workouts:       allDates.map(d => detailedWByDate[d] || []),
+                };
 
-        return HealthParser.buildFromServerParsed(raw);
+                const parsed = HealthParser.buildFromServerParsed(raw);
+                resolve(parsed);
+            }
+
+            // Begin reading
+            readNextChunk();
+        });
     }
 
     // ── 4. Synthetic Demo Fallback ─────────────────────────────────────────────
@@ -356,7 +477,7 @@ class HealthParser {
                 hrv, rhr,
             },
             workouts: { tsb, atl, ctl, minutes: wMin },
-            circadian: HealthParser._estimateCircadian(rhr, hrv, DAYS),
+            circadian: HealthParser._estimateCircadian(bedtimes, wakeups, null),
             screentime: {
                 totalHours: Array.from({ length: DAYS }, () => +(Math.random() * 3 + 3).toFixed(1)),
                 pickups:    Array.from({ length: DAYS }, () => Math.floor(Math.random() * 40 + 40)),
@@ -431,12 +552,12 @@ class HealthParser {
         // 1. Plot Sleep Probability
         for (let i = 0; i < bedtimes.length; i++) {
             if (!bedtimes[i] || !wakeups[i]) continue;
+            if (typeof bedtimes[i] !== 'string' || typeof wakeups[i] !== 'string') continue;
             validSleepNights++;
             
             const [bH, bM] = bedtimes[i].split(':').map(Number);
             const [wH, wM] = wakeups[i].split(':').map(Number);
             
-            let currentStr = bedtimes[i];
             let current = bH + (bM / 60);
             let end = wH + (wM / 60);
             if (end < current) end += 24; // wraps past midnight

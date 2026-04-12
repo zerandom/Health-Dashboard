@@ -1,14 +1,23 @@
 import Foundation
 
 class APIService: ObservableObject {
-    let endpoint = URL(string: "http://localhost:3000/api/sync")!
-    
+    // ── Configuration ──────────────────────────────────────────────────────────
+    // Update VERCEL_URL after deploying. For local testing, use http://localhost:3000
+    static let vercelURL = "https://ekatra.vercel.app"
+    let endpoint = URL(string: "\(APIService.vercelURL)/api/sync")!
+
+    // The user's Google email — used as the auth token to scope data server-side.
+    // Set this after the user logs in via the web app.
+    var userEmail: String = ""
+
     var onSyncCompletion: ((Bool) -> Void)?
 
     func postBulksync(payload: [DailyHealthMetrics]) {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Auth: send email as Bearer token so the server can identify the user
+        request.setValue("Bearer \(userEmail)", forHTTPHeaderField: "Authorization")
 
         do {
             let data = try JSONEncoder().encode(payload)

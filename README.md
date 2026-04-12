@@ -2,95 +2,133 @@
 
 > Turn your Apple Watch data into a personal health coach. Ekatra surfaces the patterns your wearable collects but never tells you about.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/zerandom/Health-Dashboard)
+
 ---
 
 ## What is Ekatra?
 
 Most health apps show you numbers. Ekatra shows you **what those numbers mean for you, today**.
 
-Built for people who take their health seriously, Ekatra is a self-hosted AI health dashboard that connects directly to Apple HealthKit, parses years of biometric history, and uses Gemini AI to deliver contextual, personalized coaching — not generic tips.
+A self-hosted AI health dashboard connecting directly to Apple HealthKit, parsing years of biometric history, and using Gemini AI to deliver contextual, personalised coaching — not generic tips.
+
+**Key features:** AI Health Coach · Sleep Intelligence · HRV Readiness · Habit Impact Matrix · Circadian Rhythm Estimate · Workout Momentum Tracking
 
 ---
 
-## Core Features
+## Tech Stack
 
-### 🧠 AI Health Coach
-A Gemini-powered coach card on every tab. Reads your last 14 days of biometric data and generates a fresh, specific insight on demand — not a pre-written quote, but a real analysis of _your_ patterns.
-
-### 😴 Sleep Intelligence
-- Deep, REM, and Core sleep stage breakdown across any timeframe (1W → ALL)
-- Bedtime and wakeup variance tracking with consistency scoring
-- Primary night session heuristic (filters naps from main sleep sessions automatically)
-- Historical synthesis: correlates sleep architecture with HRV and recovery trends
-
-### 💪 Dynamic Readiness Coach
-HRV-based daily training recommendation. The Workouts tab evaluates your nervous system state and tells you whether to push, recover, or hold steady — with context from your recent training load.
-
-### 📊 Habit Impact Matrix
-Log habits (alcohol, cold plunge, sauna, supplements, heavy training, etc.) with a single tap. Ekatra statistically correlates them against your biometrics — showing you the exact HRV dividend or tax each habit has on your body, with next-day lag analysis.
-
-### 🔥 Momentum & Streak Tracking
-90-day workout heatmap and habit streak counters that keep you honest about consistency without gamification gimmicks.
-
-### 🕐 Circadian Rhythm Estimate
-Predicts your personal energy peaks and valleys based on historical sleep timing and heart rate patterns.
-
----
-
-## Data Synchronization
-
-### Option 1: Native iOS App *(Recommended)*
-A native Swift app that runs on your iPhone and syncs HealthKit data to Ekatra automatically in the background — no manual exports, no Shortcuts needed.
-- [Setup Instructions](ios/ios_setup.md)
-
-### Option 2: Apple Health XML Export
-Import your full history (years of data) in one shot.
-- Go to the **Data Import** tab in the dashboard.
-- Export `export.xml` from the iPhone Health app and drop it in.
-- The server parses files of any size (1GB+) asynchronously in the background.
-
----
-
-## Architecture
-
-| Layer | Technology | Role |
-|---|---|---|
-| Frontend | Vanilla HTML/CSS/JS | Dashboard UI, charts, habit logging |
-| Backend | Python (stdlib only) | HTTP server, HealthKit XML parser, AI proxy |
-| AI | Google Gemini API | Health coaching, sleep synthesis |
-| iOS App | Swift / HealthKit | Background data sync from Apple Watch |
-| Data | JSON files (local) | Zero-dependency persistence |
-
-No databases. No cloud. Your health data stays on your machine.
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 14 (App Router) |
+| Auth | NextAuth.js v4 (Google OAuth) |
+| Database | Supabase (PostgreSQL) |
+| AI | Google Gemini 2.0 Flash |
+| iOS Sync | Swift / HealthKit companion app |
+| Hosting | Vercel |
 
 ---
 
 ## Getting Started
 
-1. **Add your Gemini API key** to `.env` (copy from `.env.example`):
-   ```
-   GOOGLE_API_KEY=your_key_here
-   ```
+### 1. Prerequisites
 
-2. **Start the server:**
-   ```bash
-   python3 server.py
-   ```
+- [Node.js 18+](https://nodejs.org)
+- A [Supabase](https://supabase.com) project (free tier works)
+- A [Google Cloud](https://console.cloud.google.com) project with OAuth credentials
+- A [Gemini API key](https://aistudio.google.com/apikey)
 
-3. **Open the dashboard:**
-   ```
-   http://localhost:3000
-   ```
+### 2. Clone & Install
 
-4. **Import data** via the Data Import tab or set up the iOS companion app.
+```bash
+git clone https://github.com/zerandom/Health-Dashboard.git ekatra
+cd ekatra
+npm install
+```
+
+### 3. Set Up Environment Variables
+
+```bash
+cp .env.example .env.local
+```
+
+Fill in all values in `.env.local` (see `.env.example` for descriptions).
+
+### 4. Set Up Supabase
+
+1. Create a new project at [supabase.com](https://supabase.com)
+2. Open **SQL Editor** and run the contents of `supabase/schema.sql`
+3. Copy your project URL and API keys into `.env.local`
+
+### 5. Set Up Google OAuth
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials
+2. Create an **OAuth 2.0 Client ID** (Web application)
+3. Add authorised redirect URIs:
+   - `http://localhost:3000/api/auth/callback/google` (development)
+   - `https://your-app.vercel.app/api/auth/callback/google` (production)
+4. Copy Client ID and Secret into `.env.local`
+
+### 6. Run Locally
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000)
+
+### 7. Deploy to Vercel
+
+```bash
+npx vercel
+```
+
+Add all environment variables in the Vercel dashboard under Project Settings → Environment Variables. Update `NEXTAUTH_URL` to your production domain.
+
+---
+
+## Data Import
+
+### Option 1: iOS Companion App *(Recommended)*
+Automatically syncs HealthKit data in the background. See [iOS Setup Guide](ios/ios_setup.md).
+
+### Option 2: Apple Health XML Export
+Coming in Phase 2. For now, import your data via the iOS companion app.
 
 ---
 
 ## Project Structure
 
 ```
-/public        → Frontend (HTML, CSS, JS)
-/server.py     → Python backend + HealthKit XML parser + Gemini AI proxy
-/ios           → Native Swift app for background HealthKit sync
-/data          → Local JSON data store (parsed.json, latest.json, tags.json)
+/app                  → Next.js App Router pages and API routes
+  /api/auth           → NextAuth Google OAuth handler
+  /api/data           → Serve user's health data
+  /api/health         → Live sync data (iOS)
+  /api/sync           → iOS HealthKit sync endpoint
+  /api/tags           → Habit log persistence
+  /api/ai             → Gemini AI coaching endpoints
+  /dashboard          → Main dashboard page (auth protected)
+  /login              → Google sign-in page
+/components           → Shared React components
+/lib                  → Supabase client, auth config
+/public               → Static assets (app.js, parser.js, index.css)
+/supabase             → Database schema SQL
+/ios                  → Native Swift companion app
 ```
+
+---
+
+## Environment Variables
+
+See `.env.example` for the full list with descriptions.
+
+| Variable | Required | Description |
+|---|---|---|
+| `NEXTAUTH_SECRET` | ✅ | Random secret for JWT signing |
+| `NEXTAUTH_URL` | ✅ | App base URL |
+| `GOOGLE_CLIENT_ID` | ✅ | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | ✅ | Google OAuth client secret |
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Supabase anonymous key |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Supabase service role key (server only) |
+| `GOOGLE_API_KEY` | ✅ | Gemini API key for AI coaching |
