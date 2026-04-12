@@ -21,8 +21,8 @@ export default function DashboardClient({ user }) {
       {/* Load Chart.js and plugin before app.js */}
       <Script src="https://cdn.jsdelivr.net/npm/chart.js" strategy="beforeInteractive" />
       <Script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation" strategy="beforeInteractive" />
-      <Script src="/parser.js?v=5" strategy="beforeInteractive" />
-      <Script src="/app.js?v=5" strategy="afterInteractive" />
+      <Script src={`/parser.js?v=${Date.now()}`} strategy="beforeInteractive" />
+      <Script src={`/app.js?v=${Date.now()}`} strategy="afterInteractive" />
 
       <div className="app-container">
         {/* ── Sidebar ── */}
@@ -163,6 +163,15 @@ export default function DashboardClient({ user }) {
 
               <div className="bento-card">
                 <div className="card-header-flex">
+                  <h2 className="panel-title">TOTAL SLEEP</h2>
+                  <span className="badge-lite" id="efficiency-badge-main">--%</span>
+                </div>
+                <div className="data-primary" id="dash-sleep-total">-- <span className="unit">h</span></div>
+                <div className="kpi-subtext" id="dash-naps">No naps</div>
+              </div>
+
+              <div className="bento-card">
+                <div className="card-header-flex">
                   <h2 className="panel-title">SLEEP EFFICIENCY</h2>
                   <span className="badge-lite" id="efficiency-badge">--%</span>
                 </div>
@@ -228,6 +237,13 @@ export default function DashboardClient({ user }) {
                 <h2 className="panel-title">HRV RECOVERY TREND</h2>
                 <div className="chart-container-lg">
                   <canvas id="hrvChartOnly"></canvas>
+                </div>
+              </div>
+
+              <div className="bento-card span-full">
+                <h2 className="panel-title">RESTING HEART RATE TREND</h2>
+                <div className="chart-container-lg">
+                  <canvas id="rhrChartOnly"></canvas>
                 </div>
               </div>
 

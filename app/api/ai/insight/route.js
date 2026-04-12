@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
+import https from 'https';
 
 // GET /api/ai/insight — daily Coach AI card
 export async function GET() {
@@ -14,10 +15,11 @@ export async function GET() {
   }
 
   const supabase = getSupabaseAdmin();
+  const userEmail = session.user.email.toLowerCase();
   const { data } = await supabase
     .from('health_data')
     .select('payload')
-    .eq('user_email', session.user.email)
+    .eq('user_email', userEmail)
     .single();
 
   if (!data?.payload) {
@@ -38,28 +40,70 @@ export async function GET() {
   ).join('\n');
 
   const nowStr = new Date().toISOString();
-  const prompt = `CURRENT TIME: ${nowStr}\nYou are the Ekatra Health Coach. Analyze the last 14 days of health data. Provide a single, proactive, and FRESH health insight (max 2 sentences). If the data is stagnant compared to previous days, explicitly mention it or find a minor nuance to highlight. Avoid repeating generic advice. Be punchy.\n\nDATA:\n${summary}`;
+  const prompt = `You are a LIFESTYLE WELLNESS ASSISTANT (Not a doctor). Analyze the last 14 days of health data. 
+Provide a single, proactive, and FRESH health insight (1-2 sentences). 
+Focus on lifestyle trends, energy, and recovery. DO NOT provide medical diagnoses.
+CRITICAL: Ensure the response is a complete thought and does NOT end mid-sentence.
+Avoid repeating generic advice. Be punchy.
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GOOGLE_API_KEY}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 1.0, maxOutputTokens: 100 },
-      }),
-    });
-    const json = await res.json();
-    if (!json.candidates || !json.candidates[0]) {
-      console.error('[AI insight] Gemini API Error:', json);
-      throw new Error(json.error?.message || 'Empty API candidate response');
+DATA:
+${summary}`;
+
+  const cleanKey = (GOOGLE_API_KEY || '').trim().replace(/[\s"']/g, '');
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  let insight = null;
+  let lastError = null;
+
+  console.log(`[AI insight] Nuclear Bypass Fetch. Key len: ${cleanKey.length}. Models: ${models.join(', ')}`);
+
+  for (const model of models) {
+    try {
+      insight = await new Promise((resolve, reject) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+        const req = https.request(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, (res) => {
+          let body = '';
+          res.on('data', d => body += d);
+          res.on('end', () => {
+            try {
+              const json = JSON.parse(body);
+              if (res.statusCode === 200 && json.candidates?.[0]) {
+                resolve(json.candidates[0].content.parts[0].text.trim());
+              } else {
+                reject(new Error(json.error?.message || `HTTP ${res.statusCode}: ${body.substring(0,100)}`));
+              }
+            } catch(e) { reject(e); }
+          });
+        });
+        req.on('error', reject);
+        req.write(JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
+          safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+          ]
+        }));
+        req.end();
+      });
+
+      if (insight) {
+        console.log(`[AI Final] Insight: "${insight}"`);
+        break;
+      }
+    } catch (e) {
+      lastError = e.message;
+      console.warn(`[AI insight] Attempt ${model} failed: ${lastError}`);
     }
-    const insight = json.candidates[0].content.parts[0].text.trim();
-    return NextResponse.json({ insight });
-  } catch (e) {
-    console.error('[AI insight]', e);
-    // Return 200 with a graceful fallback so the UI shows something meaningful
-    return NextResponse.json({ insight: 'The AI Coach is taking a breather. Your data is loading — check back in a moment.' });
   }
+
+  if (insight) return NextResponse.json({ insight });
+  return NextResponse.json({ 
+    insight: `AI Insight failed to initialize. Try again in a few minutes. (Debug: ${lastError})`, 
+    is_mock: true 
+  });
 }

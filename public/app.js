@@ -15,7 +15,8 @@ const state = {
     lastSync: null,
     activeRange: 365, // Default to 1Y
     chartRanges: {
-        sleep: 365,
+        'sleep-recovery': 365,  // keyed to match data-chart attr on range buttons
+        sleep: 365,             // legacy alias kept for safety
         recovery: 365,
         rhr: 365,
         workouts: 365
@@ -60,6 +61,11 @@ const colors = {
     social: '#FF6B6B',
     ent:    '#FFD166',
     other:  '#94A3B8',
+    // Sleep stage colours (used by sleepStagesChart on the dashboard)
+    deep:   '#8F00FF',  // violet — deep sleep
+    rem:    '#4CC9F0',  // blue   — REM sleep
+    core:   '#FFD166',  // amber  — core/light sleep
+    nap:    '#A78BFA',  // lavender — daytime naps
 };
 
 console.log('[App] Script parsed and executing top-level scope.');
@@ -367,18 +373,33 @@ async function handleXmlUpload(file) {
     if (statusText) statusText.innerText = `Stream parsing ${file.name} locally...`;
 
     try {
-        const parsed = await HealthParser.streamParseXML(file, (loaded, total) => {
+        const rawData = await HealthParser.streamParseXML(file, (loaded, total) => {
             const percent = ((loaded / total) * 100).toFixed(1);
             if (statusText) statusText.innerText = `Crunching data: ${percent}% (Never leaves your browser)`;
         });
         
         if (statusText) statusText.innerText = 'XML parsed! Securing your health data to your cloud account...';
         
+        if (!rawData || !rawData.dates || rawData.dates.length === 0) {
+            throw new Error("No consistent wearable (HRV/Sleep) data found. Ensure you have Apple Watch logs in your health export.");
+        }
+        
+        const jsonString = JSON.stringify(rawData);
+        if (!jsonString || jsonString === "null") {
+            throw new Error("Data serialization failed (Empty Result). This usually happens if the parsed object is corrupted or too large for browser memory.");
+        }
+
+        console.log("[Dashboard] RAW PAYLOAD READY:", {
+            keys: Object.keys(rawData),
+            dateCount: rawData.dates.length,
+            byteSize: jsonString.length
+        });
+
         // Post the ~3MB parsed JSON directly to Supabase via our Next.js API
         const res = await fetch('/api/data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(parsed)
+            body: jsonString
         });
 
         if (!res.ok) {
@@ -386,7 +407,8 @@ async function handleXmlUpload(file) {
             throw new Error(`Cloud save failed (HTTP ${res.status}): ${errorText.substring(0, 150)}`);
         }
 
-        if (parsed && parsed.dates.length > 0) {
+        if (rawData && rawData.dates.length > 0) {
+            const parsed = HealthParser.buildFromServerParsed(rawData);
             state.data   = parsed;
             state.isDemo = false;
             setStatusBadge(`Live (${parsed.dates.length} days)`, true);
@@ -503,6 +525,7 @@ function _updateUIInternal(d) {
     setText('dash-recovery-score', d.recovery.score);
     setText('dash-hrv', d.recovery.hrv[last] != null ? Math.round(d.recovery.hrv[last]) : '--');
     setText('dash-rhr', d.recovery.rhr[last] != null ? Math.round(d.recovery.rhr[last]) : '--');
+    setText('dash-sleep-total', d.sleep.totalHoursLast || '--');
 
     // Sleep/Wake Variance calculation
     updateSleepWakeMetrics();
@@ -561,6 +584,13 @@ function _updateUIInternal(d) {
     }
 
     if (d.signals) console.log('[SleepOS] Signals Debug:', d.signals[last] || d.signals);
+
+    // Daytime Naps KPI
+    const napEl = document.getElementById('dash-naps');
+    if (napEl && d.sleep.naps) {
+        const nMins = d.sleep.naps[last] || 0;
+        napEl.innerText = nMins > 0 ? `+ ${nMins}m nap` : 'No naps';
+    }
 
     // Coach AI Animation
     const waveform = document.querySelector('.waveform-container');
@@ -1272,8 +1302,8 @@ function renderCharts(sectionId) {
         renderRecoveryTrendChart(r);
 
     } else if (sectionId === 'sleep-recovery') {
-        // state.chartRanges uses 'sleep' as the key from the time-range selectors
-        const range = state.chartRanges['sleep'] || state.chartRanges['sleep-recovery'] || 365;
+        // Range buttons use data-chart="sleep-recovery" → writes to chartRanges['sleep-recovery']
+        const range = state.chartRanges['sleep-recovery'] || 365;
         renderSleepTrendChart(range);
         renderHrvChartOnly(range);
         renderRhrChartOnly(range);
@@ -1488,11 +1518,13 @@ function renderSleepTrendChart(days = 365) {
             labels: _slice(d.dates, days),
             datasets: [
                 { label: 'Deep',  data: _slice(d.sleep.deep, days).map(v => +(v/60).toFixed(2)),
-                  backgroundColor: colors.coral, stack: 's' },
+                  backgroundColor: colors.coral, stack: 'night' },
                 { label: 'REM',   data: _slice(d.sleep.rem,  days).map(v => +(v/60).toFixed(2)),
-                  backgroundColor: colors.violet,  stack: 's' },
+                  backgroundColor: colors.violet,  stack: 'night' },
                 { label: 'Core',  data: _slice(d.sleep.core, days).map(v => +(v/60).toFixed(2)),
-                  backgroundColor: '#4C1D95', stack: 's', borderRadius: { topLeft:5, topRight:5 } },
+                  backgroundColor: '#4C1D95', stack: 'night', borderRadius: { topLeft:5, topRight:5 } },
+                { label: 'Naps',  data: _slice(d.sleep.naps, days).map(v => +(v/60).toFixed(2)),
+                  backgroundColor: colors.nap, stack: 'nap', borderRadius: { topLeft:5, topRight:5 } },
             ],
         },
         options: {
@@ -2543,8 +2575,8 @@ window.quickLogHabit = function(tag) {
         state.data.tags[dateStr] = [...tagsArr];
     }
     
-    // Auto-save logic utilizing the existing Correlator POST pipeline
-    if (typeof saveTagsToServer === 'function') saveTagsToServer();
+    // Auto-save with the correct date + tags arguments
+    if (typeof saveTagsToServer === 'function') saveTagsToServer(dateStr, state.data.tags[dateStr]);
     
     // Show success message briefly, then auto-close
     const msg = document.getElementById('ql-success-msg');

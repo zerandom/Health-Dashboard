@@ -9,10 +9,12 @@ export async function GET() {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const supabase = getSupabaseAdmin();
+  const userEmail = session.user.email.toLowerCase();
+
   const { data, error } = await supabase
     .from('habit_tags')
     .select('habits, log')
-    .eq('user_email', session.user.email)
+    .eq('user_email', userEmail)
     .single();
 
   if (error || !data) {
@@ -38,12 +40,19 @@ export async function POST(request) {
   }
 
   const supabase = getSupabaseAdmin();
+  const userEmail = session.user.email.toLowerCase();
+
+  // Self-healing: Ensure user exists
+  await supabase.from('users').upsert(
+    { email: userEmail, name: session.user.name, avatar_url: session.user.image },
+    { onConflict: 'email' }
+  );
 
   // Fetch existing record
   const { data: existing } = await supabase
     .from('habit_tags')
     .select('habits, log')
-    .eq('user_email', session.user.email)
+    .eq('user_email', userEmail)
     .single();
 
   const current = existing ?? { habits: ['alcohol', 'supplements', 'sauna', 'cold_plunge', 'heavy_leg_day'], log: {} };
@@ -56,7 +65,7 @@ export async function POST(request) {
   }
 
   await supabase.from('habit_tags').upsert(
-    { user_email: session.user.email, habits: current.habits, log: current.log },
+    { user_email: userEmail, habits: current.habits, log: current.log },
     { onConflict: 'user_email' }
   );
 

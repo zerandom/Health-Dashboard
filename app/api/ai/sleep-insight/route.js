@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
+import https from 'https';
 
 // GET /api/ai/sleep-insight — dual-layer sleep & recovery analysis
 export async function GET() {
@@ -14,10 +15,11 @@ export async function GET() {
   }
 
   const supabase = getSupabaseAdmin();
+  const userEmail = session.user.email.toLowerCase();
   const { data } = await supabase
     .from('health_data')
     .select('payload')
-    .eq('user_email', session.user.email)
+    .eq('user_email', userEmail)
     .single();
 
   if (!data?.payload) return NextResponse.json({ insight: 'No data found.' });
@@ -39,27 +41,75 @@ export async function GET() {
     `Date: ${d}, HRV: ${hrv[i]}, RHR: ${rhr[i]}, Deep: ${deep[i]}m, REM: ${rem[i]}m, Core: ${core[i]}m, Bedtime: ${bedtimes[i] ?? 'N/A'}, Wakeup: ${wakeups[i] ?? 'N/A'}`
   ).join('\n');
 
-  const prompt = `You are the Ekatra Health Scientist. Analyze the last 14 days of Sleep and Recovery data.\nDATA CONTEXT: Sleep Trend, HRV/RHR, AND Sleep/Wake Schedule consistency.\nProvide a 3-part response that GUIDES the user:\n1. WHAT'S GOING WELL: Focus on wins (max 1 sentence).\n2. WHAT'S GOING WRONG: Focus on risks (max 1 sentence).\n3. WHAT DOES IT MEAN: Actionable meaning (max 2 sentences).\n\nBe sophisticated with specific numbers. Avoid generic advice.\n\nDATA:\n${summary}`;
+  const prompt = `You are a LIFESTYLE WELLNESS ASSISTANT (Not a doctor). Analyze the last 14 days of Sleep and Recovery data.
+DATA CONTEXT: Sleep Trend, HRV/RHR, AND Sleep/Wake Schedule consistency.
+Provide a 3-part response that GUIDES the user:
+1. WHAT'S GOING WELL: Focus on wins (max 1 sentence).
+2. WHAT'S GOING WRONG: Focus on risks (max 1 sentence).
+3. WHAT DOES IT MEAN: Actionable meaning (max 2 sentences).
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GOOGLE_API_KEY}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.8, maxOutputTokens: 400 },
-      }),
-    });
-    const json = await res.json();
-    if (!json.candidates || !json.candidates[0]) {
-      console.error('[sleep-insight] Gemini API Error:', json);
-      throw new Error(json.error?.message || 'Empty API candidate response');
+Focus strictly on lifestyle/habit trends. DO NOT provide medical diagnoses.
+CRITICAL: Ensure every part is a complete thought and does not end mid-sentence.
+Be sophisticated with specific numbers. Avoid generic advice.
+
+DATA:
+${summary}`;
+
+  const cleanKey = (GOOGLE_API_KEY || '').trim().replace(/[\s"']/g, '');
+  const models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest'];
+  let insight = null;
+  let lastError = null;
+
+  console.log(`[sleep-insight] Nuclear Bypass Fetch. Key len: ${cleanKey.length}. Models: ${models.join(', ')}`);
+
+  for (const model of models) {
+    try {
+      insight = await new Promise((resolve, reject) => {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${cleanKey}`;
+        const req = https.request(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }, (res) => {
+          let body = '';
+          res.on('data', d => body += d);
+          res.on('end', () => {
+            try {
+              const json = JSON.parse(body);
+              if (res.statusCode === 200 && json.candidates?.[0]) {
+                resolve(json.candidates[0].content.parts[0].text.trim());
+              } else {
+                reject(new Error(json.error?.message || `HTTP ${res.statusCode}: ${body.substring(0,100)}`));
+              }
+            } catch(e) { reject(e); }
+          });
+        });
+        req.on('error', reject);
+        req.write(JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
+          safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+          ]
+        }));
+        req.end();
+      });
+
+      if (insight) {
+        console.log(`[Sleep AI Final] Insight: "${insight.substring(0, 100)}..."`);
+        break;
+      }
+    } catch (e) {
+      lastError = e.message;
+      console.warn(`[sleep-insight] Attempt ${model} failed: ${lastError}`);
     }
-    const insight = json.candidates[0].content.parts[0].text.trim();
-    return NextResponse.json({ insight });
-  } catch (e) {
-    console.error('[sleep-insight]', e);
-    return NextResponse.json({ insight: 'Sleep analysis engine is warming up. Your biometric data is queued — check back shortly.' });
   }
+
+  if (insight) return NextResponse.json({ insight });
+  return NextResponse.json({ 
+    insight: `Sleep Analyst failed to initialize. Try again in a few minutes. (Debug: ${lastError})`, 
+    is_mock: true 
+  });
 }

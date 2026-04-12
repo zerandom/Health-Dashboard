@@ -6,98 +6,102 @@ class HealthParser {
 
     // ── 1. Build from Server-Parsed JSON (/api/data) ──────────────────────────
     // The server returns flat arrays: { dates, hrv, rhr, sleepDeep, sleepREM, sleepCore, workoutMinutes }
+    // 1. Build from Server-Parsed JSON (/api/data) 
+    // This is the single, hardened source of truth for constructing the dashboard state.
     static buildFromServerParsed(raw) {
-        const n = raw.dates?.length;
-        if (!n) return null;
-
-        // Ensure chronological order by sorting the ISO YYYY-MM-DD strings
-        const indices = raw.dates.map((d, i) => i)
-            .sort((a, b) => raw.dates[a].localeCompare(raw.dates[b]));
-        
-        raw.dates = indices.map(i => raw.dates[i]);
-        if (raw.hrv) raw.hrv = indices.map(i => raw.hrv[i]);
-        if (raw.rhr) raw.rhr = indices.map(i => raw.rhr[i]);
-        if (raw.sleepDeep) raw.sleepDeep = indices.map(i => raw.sleepDeep[i]);
-        if (raw.sleepREM) raw.sleepREM = indices.map(i => raw.sleepREM[i]);
-        if (raw.sleepCore) raw.sleepCore = indices.map(i => raw.sleepCore[i]);
-        if (raw.workoutMinutes) raw.workoutMinutes = indices.map(i => raw.workoutMinutes[i]);
-        if (raw.sleepBedtimes) raw.sleepBedtimes = indices.map(i => raw.sleepBedtimes[i]);
-        if (raw.sleepWakeups) raw.sleepWakeups = indices.map(i => raw.sleepWakeups[i]);
-
-        // Normalise nulls to interpolated/neighbour values
-        const fill = (arr) => {
-            const out = [...arr];
-            for (let i = 0; i < out.length; i++) {
-                if (out[i] === null || out[i] === undefined) {
-                    // find nearest non-null neighbour
-                    let left = null, right = null;
-                    for (let l = i - 1; l >= 0; l--) { if (out[l] !== null) { left = out[l]; break; } }
-                    for (let r = i + 1; r < out.length; r++) { if (out[r] !== null) { right = out[r]; break; } }
-                    out[i] = left !== null ? left : (right !== null ? right : 0);
-                }
+        try {
+            if (!raw || !raw.dates || !raw.dates.length) {
+                return { 
+                    dates: [], 
+                    rawDates: [],
+                    recovery: { score: 0, hrv: [], rhr: [] }, 
+                    sleep: { score: 0, totalHoursLast: 0, deep: [], rem: [], core: [] }, 
+                    workouts: { minutes: [], detailed: [], tsb: [], atl: [], ctl: [] }, 
+                    averages: { hrv: [], rhr: [], deep: [], rem: [], core: [] },
+                    signals: { efficiency: [], velocity: { hrv: [] }, debt: { deep: [] } },
+                    circadian: { labels: [], sleepProb: [], activityHotspots: [] },
+                    screentime: { totalHours: [], pickups: [], categories: { labels: [], data: [] } },
+                    _source: 'empty'
+                };
             }
-            return out;
-        };
+            const n = raw.dates.length;
 
-        const hrv  = fill(raw.hrv  || Array(n).fill(null));
-        const rhr  = fill(raw.rhr  || Array(n).fill(null));
-        const deep = raw.sleepDeep || Array(n).fill(0);
-        const rem  = raw.sleepREM  || Array(n).fill(0);
-        const core = raw.sleepCore || Array(n).fill(0);
-        const wMin = raw.workoutMinutes || Array(n).fill(0);
+            // Sort chronically
+            const indices = raw.dates.map((d, i) => i)
+                .sort((a, b) => raw.dates[a].localeCompare(raw.dates[b]));
+            
+            raw.dates = indices.map(i => raw.dates[i]);
+            if (raw.hrv) raw.hrv = indices.map(i => raw.hrv[i]);
+            if (raw.rhr) raw.rhr = indices.map(i => raw.rhr[i]);
+            if (raw.sleepDeep) raw.sleepDeep = indices.map(i => raw.sleepDeep[i]);
+            if (raw.sleepREM) raw.sleepREM = indices.map(i => raw.sleepREM[i]);
+            if (raw.sleepCore) raw.sleepCore = indices.map(i => raw.sleepCore[i]);
+            if (raw.workoutMinutes) raw.workoutMinutes = indices.map(i => raw.workoutMinutes[i]);
+            if (raw.sleepBedtimes) raw.sleepBedtimes = indices.map(i => raw.sleepBedtimes[i]);
+            if (raw.sleepWakeups) raw.sleepWakeups = indices.map(i => raw.sleepWakeups[i]);
+            if (raw.sleepInBedMins) raw.sleepInBedMins = indices.map(i => raw.sleepInBedMins[i]);
+            if (raw.sleepNaps) raw.sleepNaps = indices.map(i => raw.sleepNaps[i]);
 
-        // Compute TSB (Training Stress Balance) via ATL/CTL model
-        // TRIMP proxy = workout minutes (simple)
-        const { tsb, atl, ctl } = HealthParser._computeTSB(wMin);
+            const fill = (arr) => {
+                const out = [...arr];
+                for (let i = 0; i < out.length; i++) {
+                    if (out[i] === null || out[i] === undefined) {
+                        let left = null, right = null;
+                        for (let l = i - 1; l >= 0; l--) { if (out[l] !== null) { left = out[l]; break; } }
+                        for (let r = i + 1; r < out.length; r++) { if (out[r] !== null) { right = out[r]; break; } }
+                        out[i] = left !== null ? left : (right !== null ? right : 0);
+                    }
+                }
+                return out;
+            };
 
-        // Composite scores from last day
-        const lastHrv  = hrv[n - 1]  || 40;
-        const lastRhr  = rhr[n - 1]  || 60;
-        const lastDeep = deep[n - 1] || 0;
-        const lastRem  = rem[n - 1]  || 0;
-        const lastCore = core[n - 1] || 0;
-        const totalSleep = (lastDeep + lastRem + lastCore) / 60; // hours
+            const hrv  = fill(raw.hrv  || Array(n).fill(null));
+            const rhr  = fill(raw.rhr  || Array(n).fill(null));
+            const deep = raw.sleepDeep || Array(n).fill(0);
+            const rem  = raw.sleepREM  || Array(n).fill(0);
+            const core = raw.sleepCore || Array(n).fill(0);
+            const wMin = raw.workoutMinutes || Array(n).fill(0);
 
-        const recoveryScore = HealthParser._recoveryScore(hrv, rhr, n - 1);
-        const sleepScore    = HealthParser._sleepScore(lastDeep, lastRem, lastCore);
+            const { tsb, atl, ctl } = HealthParser._computeTSB(wMin);
 
-        // Format dates for display (keep ISO string as-is — charts use them)
-        const displayDates = raw.dates.map(d => {
-            const dt = new Date(d + 'T00:00:00');
-            return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        });
+            const lastDeep = deep[n - 1] || 0;
+            const lastRem  = rem[n - 1]  || 0;
+            const lastCore = core[n - 1] || 0;
+            const totalSleep = (lastDeep + lastRem + lastCore) / 60;
 
-        return {
-            dates: displayDates,
-            rawDates: raw.dates,  // ISO strings (YYYY-MM-DD) — used for tag keying
-            sleep: {
-                score: sleepScore,
-                totalHoursLast: +totalSleep.toFixed(1),
-                deep,
-                rem,
-                core,
-            },
-            recovery: {
-                score: recoveryScore,
-                hrv,
-                rhr,
-            },
-            workouts: {
-                tsb,
-                atl,
-                ctl,
-                minutes: wMin,
-                detailed: raw.workouts || Array(n).fill([]),
-            },
-            circadian: HealthParser._estimateCircadian(raw.sleepBedtimes, raw.sleepWakeups, raw.workouts),
-            screentime: HealthParser._emptyScreentime(n),
-            sleepBedtimes:  raw.sleepBedtimes  || Array(n).fill(null),
-            sleepWakeups:   raw.sleepWakeups   || Array(n).fill(null),
-            sleepInBedMins: raw.sleepInBedMins || Array(n).fill(0),
-            signals: HealthParser._computeAdvancedSignals({ hrv, rhr, deep, rem, core, wMin, inBed: raw.sleepInBedMins }),
-            averages: HealthParser._computeRollingAverages({ hrv, rhr, deep, rem, core }),
-            _source: raw.dataSource || 'xml',
-        };
+            const recoveryScore = HealthParser._recoveryScore(hrv, rhr, n - 1);
+            const sleepScore    = HealthParser._sleepScore(lastDeep, lastRem, lastCore);
+
+            const displayDates = raw.dates.map(d => {
+                const dt = new Date(d + 'T00:00:00');
+                if (isNaN(dt)) return d;
+                return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            });
+
+            return {
+                dates: displayDates,
+                rawDates: raw.dates,
+                sleep: { 
+                    score: sleepScore, 
+                    totalHoursLast: +totalSleep.toFixed(1), 
+                    deep, rem, core,
+                    naps: raw.sleepNaps || Array(n).fill(0)
+                },
+                recovery: { score: recoveryScore, hrv, rhr },
+                workouts: { tsb, atl, ctl, minutes: wMin, detailed: raw.workouts || Array(n).fill([]) },
+                circadian: HealthParser._estimateCircadian(raw.sleepBedtimes, raw.sleepWakeups, raw.workouts),
+                screentime: HealthParser._emptyScreentime(n),
+                sleepBedtimes:  raw.sleepBedtimes  || Array(n).fill(null),
+                sleepWakeups:   raw.sleepWakeups   || Array(n).fill(null),
+                sleepInBedMins: raw.sleepInBedMins || Array(n).fill(0),
+                signals: HealthParser._computeAdvancedSignals({ hrv, rhr, deep, rem, core, wMin, inBed: raw.sleepInBedMins }),
+                averages: HealthParser._computeRollingAverages({ hrv, rhr, deep, rem, core }),
+                _source: raw.dataSource || 'xml',
+            };
+        } catch (error) {
+            console.error("[HealthParser] buildFromServerParsed failed:", error);
+            return HealthParser.buildFromServerParsed({ dates: [] });
+        }
     }
 
     static _computeAdvancedSignals(data) {
@@ -142,8 +146,8 @@ class HealthParser {
             }
             debt.deep.push(isDeepDebt);
 
-            // 4. Fingerprinting
-            if (deep[i] < 45 && rhr[i] > (rhr[i-1] * 1.15)) {
+            // 4. Fingerprinting (guard i >= 1 to avoid rhr[-1] undefined)
+            if (i >= 1 && deep[i] < 45 && rhr[i] > (rhr[i-1] * 1.15)) {
                 fingerprints.push({ date: i, type: 'ALCOHOL_SIGNATURE' });
             }
         }
@@ -229,116 +233,208 @@ class HealthParser {
     // Efficiently stream-parses multi-gigabyte XML files without blowing up DOM memory.
     static async streamParseXML(file, onProgress) {
         return new Promise((resolve, reject) => {
-            console.log('[Parser] Stream parsing huge XML:', file.size, 'bytes');
-            const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+            console.log('[Parser] Stream parsing huge XML (Stateless Version):', file.size, 'bytes');
+            const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB chunks
             const fileSize = file.size;
             let offset = 0;
-            
+            let recordCount = 0;
+            let tail = '';
+
             const hrvByDate   = {};
             const rhrByDate   = {};
-            const sleepByDate = {};
+            const sleepSegmentsByDate = {}; // New session-based collection
             const wByDate     = {};
             const detailedWByDate = {};
-            const sleepBedtimesByDate = {};
-            const sleepWakeupsByDate = {};
-            const sleepInBedByDate = {};
 
-            const DEEP_VAL  = 'HKCategoryValueSleepAnalysisAsleepDeep';
-            const REM_VAL   = 'HKCategoryValueSleepAnalysisAsleepREM';
-            const CORE_VALS = new Set([
-                'HKCategoryValueSleepAnalysisAsleepCore',
-                'HKCategoryValueSleepAnalysisAsleepUnspecified',
-                'HKCategoryValueSleepAnalysisAsleep',
-            ]);
+            // Internal: Cluster sleep segments into sessions (separated by >60m gaps)
+            const _identifySessions = (segments) => {
+                if (!segments || !segments.length) return { main: null, napMins: 0 };
+                // Clone and sort by start time
+                const sorted = [...segments].sort((a, b) => a.startDt - b.startDt);
+                const clusters = [];
+                let current = [sorted[0]];
+                for (let i = 1; i < sorted.length; i++) {
+                    const gap = (sorted[i].startDt - sorted[i-1].endDt) / 60000;
+                    if (gap < 60) current.push(sorted[i]);
+                    else { clusters.push(current); current = [sorted[i]]; }
+                }
+                clusters.push(current);
+                
+                const sessions = clusters.map(c => {
+                    const stats = { deep: 0, rem: 0, core: 0, total: 0, start: c[0].startRaw, end: c[c.length-1].endRaw, startDt: c[0].startDt, endDt: c[c.length-1].endDt };
+                    c.forEach(s => {
+                        if (s.val.includes('deep')) stats.deep += s.mins;
+                        else if (s.val.includes('rem')) stats.rem += s.mins;
+                        else if (s.val.includes('asleep')) stats.core += s.mins;
+                        stats.total += s.mins;
+                    });
+                    stats.wearableTotal = stats.deep + stats.rem + stats.core;
+                    return stats;
+                });
 
-            const recordRegex = /<(Record|Workout)[^>]+>/g;
-            const typeRegex = /type="([^"]+)"/;
-            const startRegex = /startDate="([^"]+)"/;
-            const endRegex = /endDate="([^"]+)"/;
-            const valRegex = /value="([^"]+)"/;
-            const durRegex = /duration="([^"]+)"/;
-            const wTypeRegex = /workoutActivityType="([^"]+)"/;
+                // NEW HEURISTIC: Prioritize wearable-validated data
+                const wearableSessions = sessions.filter(s => s.wearableTotal > 0);
+                
+                if (wearableSessions.length > 0) {
+                    // MERGE: If there are multiple wearable sessions, they are likely split rest periods
+                    // We merge ALL wearable sessions into the "Main Sleep" if they are part of this logical day
+                    const main = wearableSessions.reduce((acc, s) => ({
+                        deep: acc.deep + s.deep,
+                        rem:  acc.rem + s.rem,
+                        core: acc.core + s.core,
+                        total: acc.total + s.total,
+                        wearableTotal: acc.wearableTotal + s.wearableTotal,
+                        start: acc.startDt < s.startDt ? acc.start : s.start,
+                        end:   acc.endDt > s.endDt ? acc.end : s.end,
+                        startDt: new Date(Math.min(acc.startDt, s.startDt)),
+                        endDt:   new Date(Math.max(acc.endDt, s.endDt))
+                    }));
 
-            let tail = '';
+                    // Naps = Any session with stages that we DIDN'T count (wait, we merged all of them)
+                    // Actually, if someone has a wearable session at 2 PM and 11 PM, merging them might be too aggressive.
+                    // But the user said "naps don't actually have rem, deep, core dataAnyway".
+                    // So if it HAS stage data, it's probably part of their main rest or a "real" sleep bout.
+                    
+                    // For now, follow the merge-all-wearable strategy to fix split nights.
+                    const otherSessions = sessions.filter(s => !wearableSessions.includes(s));
+                    const napMins = otherSessions.reduce((sum, s) => sum + s.total, 0);
+
+                    return { main, napMins };
+                } else {
+                    // No wearable data found? Pick the longest manual/estimated session as main only if > 3hrs
+                    const sorted = [...sessions].sort((a, b) => b.total - a.total);
+                    const longest = sorted[0];
+                    if (longest.total > 180) { // > 3 hours
+                        return { main: longest, napMins: sorted.slice(1).reduce((sum, s) => sum + s.total, 0) };
+                    } else {
+                        return { main: null, napMins: sorted.reduce((sum, s) => sum + s.total, 0) };
+                    }
+                }
+            };
+
             const reader = new FileReader();
 
+            let sniffingCount = 0;
+
+            const parseDateSafe = (dStr) => {
+                if (!dStr) return new Date("");
+                // Apple Health uses "2023-10-03 05:28:05 +0530"
+                // Browsers hate the space before the "+". 
+                // We convert to ISO: "2023-10-03T05:28:05+0530"
+                const normalized = dStr.trim()
+                    .replace(' ', 'T')           // Replace first space (between date and time)
+                    .replace(/\s([+-])/, '$1')   // Remove space before timezone offset
+                    .replace(/([+-]\d{2})(\d{2})$/, "$1:$2"); // Insert colon in timezone (+0530 -> +05:30)
+                return new Date(normalized);
+            }
+
             const getLogicalDate = (dateStr) => {
-                const d = new Date(dateStr);
-                d.setHours(d.getHours() - 12);
-                return d.toISOString().slice(0, 10);
+                try {
+                    const d = parseDateSafe(dateStr);
+                    if (isNaN(d.getTime())) return null;
+                    // Noon-to-noon logical day (subtract 12 hours)
+                    d.setHours(d.getHours() - 12);
+                    return d.toISOString().slice(0, 10);
+                } catch (e) {
+                    return null;
+                }
             };
 
             reader.onload = function(e) {
                 if (onProgress) onProgress(offset, fileSize);
 
                 const chunk = tail + e.target.result;
-                const lastBoundary = Math.max(chunk.lastIndexOf('\\n'), chunk.lastIndexOf('>'));
+                const lastBoundary = chunk.lastIndexOf('/>');
                 
-                let processable = chunk;
-                if (lastBoundary !== -1 && lastBoundary < chunk.length - 1) {
-                    processable = chunk.substring(0, lastBoundary + 1);
-                    tail = chunk.substring(lastBoundary + 1);
+                let processable = '';
+                if (lastBoundary !== -1) {
+                    const splitIdx = lastBoundary + 2; 
+                    processable = chunk.substring(0, splitIdx);
+                    tail = chunk.substring(splitIdx);
                 } else {
-                    processable = chunk;
-                    tail = '';
+                    tail = chunk;
+                    offset += CHUNK_SIZE;
+                    if (offset < fileSize) readNextChunk();
+                    else finishParsing();
+                    return;
                 }
 
-                let match;
-                while ((match = recordRegex.exec(processable)) !== null) {
+                // STATELESS Search: Locally defined patterns avoid lastIndex leaks between chunks
+                const recordRegex = /<(Record|Workout)[^>]+>/gi;
+                const typeRegex   = /type=['"]([^'"]+)['"]/i;
+                const startRegex  = /startDate=['"]([^'"]+)['"]/i;
+                const valRegex    = /value=['"]([^'"]+)['"]/i;
+                const endRegex    = /endDate=['"]([^'"]+)['"]/i;
+                const durRegex    = /duration=['"]([^'"]+)['"]/i;
+                const wTypeRegex  = /workoutActivityType=['"]([^'"]+)['"]/i;
+
+                const matches = processable.matchAll(recordRegex);
+                for (const match of matches) {
+                    recordCount++;
                     const tagContent = match[0];
-                    const isWorkout = match[1] === 'Workout';
+                    if (sniffingCount < 3) {
+                        console.log(`[Parser] Sniffer Tag ${++sniffingCount}:`, tagContent.substring(0, 300));
+                    }
+                    const tagType = match[1].toLowerCase();
+                    const isWorkout = tagType === 'workout';
                     
                     const startMatch = startRegex.exec(tagContent);
                     if (!startMatch) continue;
                     const fullDateStr = startMatch[1];
-                    const date = fullDateStr.slice(0, 10);
-                    if (!date) continue;
+                    let lDate = getLogicalDate(fullDateStr);
+                    
+                    // RELIABILITY FALLBACK: If logical date processing fails, use literal date
+                    if (!lDate) {
+                        lDate = fullDateStr.split(' ')[0] || fullDateStr.split('T')[0];
+                    }
+                    if (!lDate || lDate.length < 10) continue;
 
                     if (isWorkout) {
                         const durMatch = durRegex.exec(tagContent);
                         if (durMatch) {
                             const dur = parseFloat(durMatch[1] || 0);
-                            wByDate[date] = (wByDate[date] || 0) + dur;
+                            wByDate[lDate] = (wByDate[lDate] || 0) + dur;
                             
                             const wtMatch = wTypeRegex.exec(tagContent);
                             let t = wtMatch ? wtMatch[1] : 'Other';
                             t = t.replace('HKWorkoutActivityType', '');
-                            if (!detailedWByDate[date]) detailedWByDate[date] = [];
-                            detailedWByDate[date].push({ type: t, duration: dur, date: fullDateStr });
+                            if (!detailedWByDate[lDate]) detailedWByDate[lDate] = [];
+                            detailedWByDate[lDate].push({ type: t, duration: dur, date: fullDateStr });
                         }
                     } else {
-                        const typeMatch = typeRegex.exec(tagContent);
-                        if (!typeMatch) continue;
-                        const type = typeMatch[1];
+                        const tpMatch = typeRegex.exec(tagContent);
+                        if (!tpMatch) continue;
+                        const type = tpMatch[1];
                         
-                        if (type === 'HKQuantityTypeIdentifierHeartRateVariabilitySDNN') {
+                        if (type.includes('HeartRateVariability')) {
                             const valMatch = valRegex.exec(tagContent);
-                            if (valMatch) (hrvByDate[date] = hrvByDate[date] || []).push(parseFloat(valMatch[1]));
-                        } else if (type === 'HKQuantityTypeIdentifierRestingHeartRate') {
+                            if (valMatch) (hrvByDate[lDate] = hrvByDate[lDate] || []).push(parseFloat(valMatch[1]));
+                        } else if (type.includes('RestingHeartRate')) {
                             const valMatch = valRegex.exec(tagContent);
-                            if (valMatch) (rhrByDate[date] = rhrByDate[date] || []).push(parseFloat(valMatch[1]));
-                        } else if (type === 'HKCategoryTypeIdentifierSleepAnalysis') {
+                            if (valMatch) (rhrByDate[lDate] = rhrByDate[lDate] || []).push(parseFloat(valMatch[1]));
+                        } else if (type.includes('SleepAnalysis')) {
                             const valMatch = valRegex.exec(tagContent);
                             const endMatch = endRegex.exec(tagContent);
                             if (valMatch && endMatch) {
                                 const endStr = endMatch[1];
                                 const val = valMatch[1];
-                                const mins = (new Date(endStr) - new Date(fullDateStr)) / 60000;
-                                const lDate = getLogicalDate(fullDateStr);
+                                const startDt = parseDateSafe(fullDateStr);
+                                const endDt = parseDateSafe(endStr);
+                                const mins = (endDt - startDt) / 60000;
                                 
                                 if (mins > 0) {
-                                    if (!sleepByDate[lDate]) sleepByDate[lDate] = { deep: 0, rem: 0, core: 0 };
-                                    if (val === DEEP_VAL) sleepByDate[lDate].deep += mins;
-                                    else if (val === REM_VAL) sleepByDate[lDate].rem += mins;
-                                    else if (CORE_VALS.has(val)) sleepByDate[lDate].core += mins;
-                                    else if (val === 'HKCategoryValueSleepAnalysisInBed') {
-                                        sleepInBedByDate[lDate] = (sleepInBedByDate[lDate] || 0) + mins;
-                                        if (!sleepBedtimesByDate[lDate] || new Date(fullDateStr) < new Date(sleepBedtimesByDate[lDate])) {
-                                            sleepBedtimesByDate[lDate] = fullDateStr;
-                                        }
-                                        if (!sleepWakeupsByDate[lDate] || new Date(endStr) > new Date(sleepWakeupsByDate[lDate])) {
-                                            sleepWakeupsByDate[lDate] = endStr;
-                                        }
+                                    if (!sleepSegmentsByDate[lDate]) sleepSegmentsByDate[lDate] = [];
+                                    const vLower = val.toLowerCase();
+                                    
+                                    // Collect segments for post-process clustering
+                                    if (vLower.includes('asleep') || vLower.includes('deep') || vLower.includes('rem') || vLower.includes('inbed')) {
+                                        sleepSegmentsByDate[lDate].push({ 
+                                            startDt, endDt, 
+                                            startRaw: fullDateStr, 
+                                            endRaw: endStr, 
+                                            val: vLower, 
+                                            mins 
+                                        });
                                     }
                                 }
                             }
@@ -347,16 +443,11 @@ class HealthParser {
                 }
 
                 offset += CHUNK_SIZE;
-                if (offset < fileSize) {
-                    readNextChunk();
-                } else {
-                    finishParsing();
-                }
+                if (offset < fileSize) readNextChunk();
+                else finishParsing();
             };
 
-            reader.onerror = function() {
-                reject(new Error("File reading failed"));
-            };
+            reader.onerror = function() { reject(new Error("File reading failed")); };
 
             function readNextChunk() {
                 const slice = file.slice(offset, offset + CHUNK_SIZE);
@@ -364,64 +455,81 @@ class HealthParser {
             }
 
             function finishParsing() {
-                if (onProgress) onProgress(fileSize, fileSize); // 100%
-                let allDates = [...new Set([
-                    ...Object.keys(hrvByDate),
-                    ...Object.keys(rhrByDate),
-                    ...Object.keys(sleepByDate),
-                    ...Object.keys(sleepInBedByDate),
-                    ...Object.keys(wByDate)
-                ])].sort(); // Load ALL historical data
+                if (onProgress) onProgress(fileSize, fileSize);
+                
+                const hDates = Object.keys(hrvByDate);
+                const rDates = Object.keys(rhrByDate);
+                const sDates = Object.keys(sleepSegmentsByDate);
+                const hardwareDateStrings = [...new Set([...hDates, ...rDates])].sort();
+                
+                if (hardwareDateStrings.length === 0 && hDates.length === 0 && rDates.length === 0) {
+                    console.error("[Parser] Critical Failure: No wearable data found among", recordCount, "records.");
+                    resolve(HealthParser.buildFromServerParsed({ dates: [] }));
+                    return;
+                }
 
-                // We anchor the "real" start date to the first date where hardware wearables (HRV/RHR/Sleep) 
-                // began recording consistently (e.g., at least 5 logs within a 14-day window).
-                let firstHardwareIdx = 0;
-                let foundHardware = false;
-                
-                for (let i = 0; i < allDates.length; i++) {
-                    let hardwareCount = 0;
-                    for (let j = 0; j < 14 && (i + j) < allDates.length; j++) {
-                        const d = allDates[i + j];
-                        if (hrvByDate[d] || rhrByDate[d] || sleepByDate[d]) {
-                            hardwareCount++;
-                        }
+                const firstHardwareDate = hardwareDateStrings[0] || (sDates[0] || Object.keys(wByDate)[0]);
+                const allDates = [...new Set([
+                    ...hDates, ...rDates, ...sDates, ...Object.keys(wByDate)
+                ])].sort().filter(d => d >= firstHardwareDate);
+
+                // Run Heuristic: Cluster segments into Primary Night sessions vs Naps
+                const finalSleepByDate = {};
+                const finalNapsByDate  = {};
+                const finalBedtimes    = {};
+                const finalWakeups     = {};
+
+                allDates.forEach(d => {
+                    const { main, napMins } = _identifySessions(sleepSegmentsByDate[d] || []);
+                    finalSleepByDate[d] = main || { deep: 0, rem: 0, core: 0, total: 0 };
+                    finalNapsByDate[d]  = napMins;
+                    
+                    // Only consider bedding/wake timings for averages if it's "Watch Data" (has stages)
+                    if (main && (main.wearableTotal > 0)) {
+                        finalBedtimes[d] = main.start || null;
+                        finalWakeups[d]  = main.end   || null;
+                    } else {
+                        finalBedtimes[d] = null;
+                        finalWakeups[d]  = null;
                     }
-                    if (hardwareCount >= 5) { // Needs dense enough data to be "ownership"
-                        firstHardwareIdx = i;
-                        foundHardware = true;
-                        break;
-                    }
-                }
-                
-                if (foundHardware && firstHardwareIdx > 0) {
-                    allDates = allDates.slice(firstHardwareIdx);
-                }
+                });
 
                 const avg = arr => arr.length ? +(arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1) : null;
 
                 const raw = {
-                    dataSource: 'xml_browser_stream',
+                    dataSource: 'xml_browser_stateless',
                     dates:          allDates,
                     hrv:            allDates.map(d => avg(hrvByDate[d]  || [])),
                     rhr:            allDates.map(d => avg(rhrByDate[d]  || [])),
-                    sleepDeep:      allDates.map(d => +(sleepByDate[d]?.deep || 0).toFixed(1)),
-                    sleepREM:       allDates.map(d => +(sleepByDate[d]?.rem  || 0).toFixed(1)),
-                    sleepCore:      allDates.map(d => +(sleepByDate[d]?.core || 0).toFixed(1)),
-                    sleepInBedMins: allDates.map(d => +(sleepInBedByDate[d] || 0).toFixed(1)),
-                    sleepBedtimes:  allDates.map(d => sleepBedtimesByDate[d] || null),
-                    sleepWakeups:   allDates.map(d => sleepWakeupsByDate[d] || null),
+                    sleepDeep:      allDates.map(d => +(finalSleepByDate[d]?.deep || 0).toFixed(1)),
+                    sleepREM:       allDates.map(d => +(finalSleepByDate[d]?.rem  || 0).toFixed(1)),
+                    sleepCore:      allDates.map(d => +(finalSleepByDate[d]?.core || 0).toFixed(1)),
+                    sleepNaps:      allDates.map(d => +(finalNapsByDate[d] || 0).toFixed(1)),
+                    sleepBedtimes:  allDates.map(d => finalBedtimes[d]    || null),
+                    sleepWakeups:   allDates.map(d => finalWakeups[d]     || null),
                     workoutMinutes: allDates.map(d => +(wByDate[d] || 0).toFixed(1)),
                     workouts:       allDates.map(d => detailedWByDate[d] || []),
                 };
 
-                const parsed = HealthParser.buildFromServerParsed(raw);
-                resolve(parsed);
+                try {
+                    // Return the FLAT raw object for storage. 
+                    // The UI will call buildFromServerParsed() on this when needed.
+                    console.log("[Parser] Stream Parse Success:", { 
+                        totalTags: recordCount,
+                        daysRecovered: allDates.length,
+                        anchorDate: allDates[0]
+                    });
+                    resolve(raw);
+                } catch (err) {
+                    console.error("[Parser] Assembly Error:", err);
+                    resolve({ dates: [] });
+                }
             }
 
-            // Begin reading
             readNextChunk();
         });
     }
+
 
     // ── 4. Synthetic Demo Fallback ─────────────────────────────────────────────
     static generateSimulatedParsedData() {
@@ -516,9 +624,35 @@ class HealthParser {
     static _recoveryScore(hrv, rhr, idx) {
         const h = hrv[idx] || 40;
         const r = rhr[idx] || 65;
-        // Normalise: HRV 20–100 → 0–100, RHR 80–40 → 0–100
-        const hScore = Math.min(100, Math.max(0, (h - 20) / 80 * 100));
-        const rScore = Math.min(100, Math.max(0, (80 - r) / 40 * 100));
+
+        // Normalise against the user's own trailing 30-day window (personalized)
+        // Falls back to population range when data is sparse (<7 days)
+        const window = Math.min(30, idx + 1);
+        const hrvWindow = hrv.slice(Math.max(0, idx - window + 1), idx + 1).filter(Boolean);
+        const rhrWindow = rhr.slice(Math.max(0, idx - window + 1), idx + 1).filter(Boolean);
+
+        let hScore, rScore;
+        if (hrvWindow.length >= 7) {
+            const hMin = Math.min(...hrvWindow);
+            const hMax = Math.max(...hrvWindow);
+            const hRange = hMax - hMin || 1;
+            hScore = Math.min(100, Math.max(0, ((h - hMin) / hRange) * 100));
+        } else {
+            // Population fallback: HRV 20–100ms → 0–100
+            hScore = Math.min(100, Math.max(0, (h - 20) / 80 * 100));
+        }
+
+        if (rhrWindow.length >= 7) {
+            const rMin = Math.min(...rhrWindow);
+            const rMax = Math.max(...rhrWindow);
+            const rRange = rMax - rMin || 1;
+            // Lower RHR is better, so invert
+            rScore = Math.min(100, Math.max(0, ((rMax - r) / rRange) * 100));
+        } else {
+            // Population fallback: RHR 80–40bpm → 0–100
+            rScore = Math.min(100, Math.max(0, (80 - r) / 40 * 100));
+        }
+
         return Math.round(hScore * 0.6 + rScore * 0.4);
     }
 
@@ -554,10 +688,19 @@ class HealthParser {
             if (!bedtimes[i] || !wakeups[i]) continue;
             if (typeof bedtimes[i] !== 'string' || typeof wakeups[i] !== 'string') continue;
             validSleepNights++;
-            
-            const [bH, bM] = bedtimes[i].split(':').map(Number);
-            const [wH, wM] = wakeups[i].split(':').map(Number);
-            
+
+            // Handle both short "HH:MM" (demo) and full ISO "2024-03-20 22:45:00 +0530" (real XML)
+            const extractHM = (str) => {
+                const parts = str.trim().split(' ');
+                // parts[1] is the time portion for ISO strings; parts[0] for plain HH:MM
+                const timePart = parts.length > 1 ? parts[1] : parts[0];
+                const [hh, mm] = timePart.split(':').map(Number);
+                return [isNaN(hh) ? 0 : hh, isNaN(mm) ? 0 : mm];
+            };
+
+            const [bH, bM] = extractHM(bedtimes[i]);
+            const [wH, wM] = extractHM(wakeups[i]);
+
             let current = bH + (bM / 60);
             let end = wH + (wM / 60);
             if (end < current) end += 24; // wraps past midnight

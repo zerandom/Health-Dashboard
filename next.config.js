@@ -4,6 +4,11 @@ const nextConfig = {
   images: {
     domains: ['lh3.googleusercontent.com'],
   },
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
 };
 
 module.exports = nextConfig;
