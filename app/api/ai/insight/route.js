@@ -40,11 +40,11 @@ export async function GET() {
   ).join('\n');
 
   const nowStr = new Date().toISOString();
-  const prompt = `You are a LIFESTYLE WELLNESS ASSISTANT (Not a doctor). Analyze the last 14 days of health data. 
-Provide a single, proactive, and FRESH health insight (1-2 sentences). 
-Focus on lifestyle trends, energy, and recovery. DO NOT provide medical diagnoses.
-CRITICAL: Ensure the response is a complete thought and does NOT end mid-sentence.
-Avoid repeating generic advice. Be punchy.
+  const prompt = `You are a LIFESTYLE WELLNESS ASSISTANT (Not a doctor). Analyze the last 14 days of health data.
+Provide a proactive, specific, and FRESH health insight (3-5 sentences).
+Focus on lifestyle trends, energy, and recovery patterns. DO NOT provide medical diagnoses.
+CRITICAL: Ensure every sentence is complete and the response does NOT end mid-sentence.
+Be specific with numbers from the data. Avoid generic advice.
 
 DATA:
 ${summary}`;
@@ -80,7 +80,7 @@ ${summary}`;
         req.on('error', reject);
         req.write(JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
           safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },

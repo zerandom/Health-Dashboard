@@ -44,13 +44,13 @@ export async function GET() {
   const prompt = `You are a LIFESTYLE WELLNESS ASSISTANT (Not a doctor). Analyze the last 14 days of Sleep and Recovery data.
 DATA CONTEXT: Sleep Trend, HRV/RHR, AND Sleep/Wake Schedule consistency.
 Provide a 3-part response that GUIDES the user:
-1. WHAT'S GOING WELL: Focus on wins (max 1 sentence).
-2. WHAT'S GOING WRONG: Focus on risks (max 1 sentence).
-3. WHAT DOES IT MEAN: Actionable meaning (max 2 sentences).
+1. WHAT'S GOING WELL: Highlight 2-3 specific wins with numbers from the data.
+2. WHAT'S GOING WRONG: Identify 2-3 specific risks or concerning trends with numbers.
+3. WHAT DOES IT MEAN: Provide 3-4 sentences of actionable meaning and concrete next steps.
 
 Focus strictly on lifestyle/habit trends. DO NOT provide medical diagnoses.
-CRITICAL: Ensure every part is a complete thought and does not end mid-sentence.
-Be sophisticated with specific numbers. Avoid generic advice.
+CRITICAL: Every part must consist of complete sentences — the response must NOT end mid-sentence.
+Be sophisticated and specific with numbers. Avoid generic advice.
 
 DATA:
 ${summary}`;
@@ -86,7 +86,7 @@ ${summary}`;
         req.on('error', reject);
         req.write(JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
+          generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
           safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
