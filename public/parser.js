@@ -96,6 +96,13 @@ class HealthParser {
                 sleepInBedMins: raw.sleepInBedMins || Array(n).fill(0),
                 signals: HealthParser._computeAdvancedSignals({ hrv, rhr, deep, rem, core, wMin, inBed: raw.sleepInBedMins }),
                 averages: HealthParser._computeRollingAverages({ hrv, rhr, deep, rem, core }),
+                vo2Max: raw.vo2Max || Array(n).fill(null),
+                user: {
+                    ...(raw.user || { dob: null, maxHR: null }),
+                    age: raw.user?.dob
+                        ? (new Date().getFullYear() - new Date(raw.user.dob).getFullYear())
+                        : null
+                },
                 _source: raw.dataSource || 'xml',
             };
         } catch (error) {
@@ -246,6 +253,11 @@ class HealthParser {
             const wByDate     = {};
             const detailedWByDate = {};
 
+            let dob = null;
+            let maxObservedHr = 0;
+            let lastWorkout = null;
+            const vo2ByDate = {};
+
             // Internal: Cluster sleep segments into sessions (separated by >60m gaps)
             const _identifySessions = (segments) => {
                 if (!segments || !segments.length) return { main: null, napMins: 0 };
@@ -360,13 +372,15 @@ class HealthParser {
                 }
 
                 // STATELESS Search: Locally defined patterns avoid lastIndex leaks between chunks
-                const recordRegex = /<(Record|Workout)[^>]+>/gi;
+                const recordRegex = /<(Record|Workout|Me|MetadataEntry)[^>]+>/gi;
                 const typeRegex   = /type=['"]([^'"]+)['"]/i;
+                const keyRegex    = /key=['"]([^'"]+)['"]/i;
                 const startRegex  = /startDate=['"]([^'"]+)['"]/i;
                 const valRegex    = /value=['"]([^'"]+)['"]/i;
                 const endRegex    = /endDate=['"]([^'"]+)['"]/i;
                 const durRegex    = /duration=['"]([^'"]+)['"]/i;
                 const wTypeRegex  = /workoutActivityType=['"]([^'"]+)['"]/i;
+                const dobRegex    = /HKCharacteristicTypeIdentifierDateOfBirth=['"]([^'"]+)['"]/i;
 
                 const matches = processable.matchAll(recordRegex);
                 for (const match of matches) {
@@ -377,13 +391,33 @@ class HealthParser {
                     }
                     const tagType = match[1].toLowerCase();
                     const isWorkout = tagType === 'workout';
+                    const isMeta    = tagType === 'metadataentry';
+                    const isMe      = tagType === 'me';
                     
+                    if (isMe) {
+                        const m = dobRegex.exec(tagContent);
+                        if (m) dob = m[1];
+                        continue;
+                    }
+
+                    if (isMeta && lastWorkout) {
+                        const kMatch = keyRegex.exec(tagContent);
+                        const vMatch = valRegex.exec(tagContent);
+                        if (kMatch && vMatch) {
+                            const k = kMatch[1];
+                            const v = parseFloat(vMatch[1]);
+                            if (k.toLowerCase().includes('heartrate') || k.toLowerCase().includes('avghr')) {
+                                lastWorkout.avgHR = v;
+                            }
+                        }
+                        continue;
+                    }
+
                     const startMatch = startRegex.exec(tagContent);
                     if (!startMatch) continue;
                     const fullDateStr = startMatch[1];
                     let lDate = getLogicalDate(fullDateStr);
                     
-                    // RELIABILITY FALLBACK: If logical date processing fails, use literal date
                     if (!lDate) {
                         lDate = fullDateStr.split(' ')[0] || fullDateStr.split('T')[0];
                     }
@@ -399,7 +433,9 @@ class HealthParser {
                             let t = wtMatch ? wtMatch[1] : 'Other';
                             t = t.replace('HKWorkoutActivityType', '');
                             if (!detailedWByDate[lDate]) detailedWByDate[lDate] = [];
-                            detailedWByDate[lDate].push({ type: t, duration: dur, date: fullDateStr });
+                            
+                            lastWorkout = { type: t, duration: dur, date: fullDateStr, avgHR: null };
+                            detailedWByDate[lDate].push(lastWorkout);
                         }
                     } else {
                         const tpMatch = typeRegex.exec(tagContent);
@@ -412,6 +448,20 @@ class HealthParser {
                         } else if (type.includes('RestingHeartRate')) {
                             const valMatch = valRegex.exec(tagContent);
                             if (valMatch) (rhrByDate[lDate] = rhrByDate[lDate] || []).push(parseFloat(valMatch[1]));
+                        } else if (type.includes('VO2Max')) {
+                            const valMatch = valRegex.exec(tagContent);
+                            if (valMatch) {
+                                const v = parseFloat(valMatch[1]);
+                                if (v > 10 && v < 80) { // sanity range ml/kg/min
+                                    (vo2ByDate[lDate] = vo2ByDate[lDate] || []).push(v);
+                                }
+                            }
+                        } else if (type.includes('QuantityTypeIdentifierHeartRate')) {
+                            const valMatch = valRegex.exec(tagContent);
+                            if (valMatch) {
+                                const hr = parseFloat(valMatch[1]);
+                                if (hr > maxObservedHr && hr < 250) maxObservedHr = hr; 
+                            }
                         } else if (type.includes('SleepAnalysis')) {
                             const valMatch = valRegex.exec(tagContent);
                             const endMatch = endRegex.exec(tagContent);
@@ -425,8 +475,6 @@ class HealthParser {
                                 if (mins > 0) {
                                     if (!sleepSegmentsByDate[lDate]) sleepSegmentsByDate[lDate] = [];
                                     const vLower = val.toLowerCase();
-                                    
-                                    // Collect segments for post-process clustering
                                     if (vLower.includes('asleep') || vLower.includes('deep') || vLower.includes('rem') || vLower.includes('inbed')) {
                                         sleepSegmentsByDate[lDate].push({ 
                                             startDt, endDt, 
@@ -509,6 +557,11 @@ class HealthParser {
                     sleepWakeups:   allDates.map(d => finalWakeups[d]     || null),
                     workoutMinutes: allDates.map(d => +(wByDate[d] || 0).toFixed(1)),
                     workouts:       allDates.map(d => detailedWByDate[d] || []),
+                    vo2Max:         allDates.map(d => avg(vo2ByDate[d] || [])),
+                    user: {
+                        dob,
+                        maxHR: maxObservedHr || null
+                    }
                 };
 
                 try {

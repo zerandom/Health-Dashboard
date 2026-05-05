@@ -22,8 +22,9 @@ const state = {
         workouts: 365
     },
     selectedHabitDate: null,
-    calDate: new Date(), // for calendar browsing
-    calendarConnected: false
+    calDate: new Date(),
+    calendarConnected: false,
+    aiCheckin: { energy: null, note: null }
 };
 
 // Chart.js Global Defaults — High Contrast Obsidian
@@ -518,6 +519,34 @@ function updateUI() {
     }
 }
 
+// ── FITNESS AGE COMPUTATION ───────────────────────────────────────────────────
+function computeFitnessAge(d) {
+    const calAge = d.user?.age;
+    if (!calAge) return null;
+
+    const last90hrv = (d.recovery.hrv || []).slice(-90).filter(Boolean);
+    const last90rhr = (d.recovery.rhr || []).slice(-90).filter(Boolean);
+    if (last90hrv.length < 14 || last90rhr.length < 14) return null;
+
+    const avgHrv = last90hrv.reduce((a, b) => a + b, 0) / last90hrv.length;
+    const avgRhr = last90rhr.reduce((a, b) => a + b, 0) / last90rhr.length;
+
+    let fitnessAge = calAge;
+    // HRV: population median ~45ms. Each 10ms above = -2y; below = +2y
+    fitnessAge += -((avgHrv - 45) / 10) * 2;
+    // RHR: population median ~65bpm. Each 5bpm below = -1.5y
+    fitnessAge += -((65 - avgRhr) / 5) * 1.5;
+
+    // VO2 Max boost if available
+    const latestVo2 = (d.vo2Max || []).filter(Boolean).slice(-1)[0];
+    if (latestVo2) {
+        const vo2Norm = Math.max(35, 55 - (calAge - 20) * 0.3);
+        fitnessAge += -((latestVo2 - vo2Norm) / 5) * 1.5;
+    }
+
+    return Math.round(Math.max(calAge - 12, Math.min(calAge + 12, fitnessAge)));
+}
+
 function _updateUIInternal(d) {
     const last = d.recovery.hrv.length - 1; 
 
@@ -618,8 +647,30 @@ function _updateUIInternal(d) {
         tzEl.style.color = zoneColor;
     }
 
-    // Readiness Rings
+    // Readiness Rings + Fitness Age
     updateReadinessRings(d.recovery.score, d.workouts.tsb[last] || 10);
+
+    // Fitness Age card
+    const fitnessAge = computeFitnessAge(d);
+    if (fitnessAge !== null) {
+        const calAge = d.user?.age || null;
+        setText('dash-fitness-age', fitnessAge);
+        if (calAge) {
+            const diff = calAge - fitnessAge;
+            const trendEl = document.getElementById('dash-fitness-age-trend');
+            if (trendEl) {
+                trendEl.innerText = diff >= 0 ? `↓ ${diff}y younger` : `↑ ${Math.abs(diff)}y older`;
+                trendEl.style.color = diff >= 0 ? 'var(--color-accent-secondary)' : 'var(--color-accent-primary)';
+            }
+        }
+    }
+    // Readiness label for the right-side stats column
+    const readinessScore = d.recovery.score;
+    const readinessLabelEl = document.getElementById('fitness-age-readiness-label');
+    if (readinessLabelEl) {
+        const label = readinessScore >= 80 ? 'Optimal' : readinessScore >= 60 ? 'Good' : readinessScore >= 40 ? 'Moderate' : 'Low';
+        readinessLabelEl.innerText = label;
+    }
 
     renderCharts('dashboard');
 }
@@ -1248,32 +1299,92 @@ function updateCorrelatorMetrics() {
 function initAIInsightControl() {
     const btn = document.getElementById('refresh-ai-btn');
     if (btn) {
-        btn.addEventListener('click', () => fetchAIInsight());
+        // Clear previous state on button click to force new check-in
+        btn.addEventListener('click', () => {
+            state.aiCheckin = { energy: null, note: null };
+            fetchAIInsight();
+        });
     }
 }
 
-async function fetchAIInsight() {
-    const el = document.getElementById('dash-insight-text');
-    const waveform = document.querySelector('.waveform-container');
-    if (!el) return;
+function startAIInsightCheckin() {
+    const insightBox = document.querySelector('.ai-insight');
+    if (!insightBox) return;
 
-    el.style.opacity = '0.5';
+    insightBox.innerHTML = `
+        <div class="coach-checkin-container">
+            <div class="checkin-step-title">
+                <span>How is your energy?</span>
+                <button class="btn-skip-checkin" onclick="fetchAIInsight('Not provided', 'Not provided')">Skip</button>
+            </div>
+            <div class="energy-scale">
+                ${[1,2,3,4,5,6,7,8,9,10].map(v => `
+                    <button class="btn-energy" onclick="selectEnergy(${v})">${v}</button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+window.selectEnergy = (val) => {
+    state.aiCheckin.energy = val;
+    renderNotesStep();
+};
+
+function renderNotesStep() {
+    const insightBox = document.querySelector('.ai-insight');
+    if (!insightBox) return;
+
+    const tags = ['Sick', 'Stressed', 'Travelling', 'Sore', 'Fine'];
+    insightBox.innerHTML = `
+        <div class="coach-checkin-container">
+            <div class="checkin-step-title">
+                <span>Anything to flag?</span>
+                <button class="btn-skip-checkin" onclick="fetchAIInsight(${state.aiCheckin.energy}, 'Not provided')">Skip</button>
+            </div>
+            <div class="checkin-tags">
+                ${tags.map(t => `
+                    <button class="btn-tag" onclick="fetchAIInsight(${state.aiCheckin.energy}, '${t}')">${t}</button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+async function fetchAIInsight(energy = null, note = null) {
+    const el = document.getElementById('dash-insight-text');
+    const container = document.querySelector('.ai-insight');
+    const waveform = document.querySelector('.waveform-container');
+    
+    // If no params passed and no state, start check-in
+    if (energy === null && state.aiCheckin.energy === null) {
+        startAIInsightCheckin();
+        return;
+    }
+
+    // Prepare container for loading
+    container.innerHTML = `<p id="dash-insight-text">Analyzing your health patterns...</p>`;
+    const newEl = document.getElementById('dash-insight-text');
+    if (newEl) newEl.style.opacity = '0.5';
     if (waveform) waveform.classList.add('animating');
 
     try {
-        const res = await fetch('/api/ai/insight');
+        const eVal = energy || state.aiCheckin.energy || 'Not provided';
+        const nVal = note || state.aiCheckin.note || 'Not provided';
+        
+        const res = await fetch(`/api/ai/insight?energy=${eVal}&note=${nVal}`);
         const json = await res.json();
         
-        if (json.insight) {
-            el.innerText = json.insight;
-        } else {
-            el.innerText = "The AI Coach is currently unavailable. Check your connection.";
+        if (json.insight && newEl) {
+            newEl.innerText = json.insight;
+        } else if (newEl) {
+            newEl.innerText = "The AI Coach is currently unavailable. Check your connection.";
         }
     } catch (e) {
         console.error('[AI] Fetch error:', e);
-        el.innerText = "Error fetching insight. Is the server running?";
+        if (newEl) newEl.innerText = "Error fetching insight. Is the server running?";
     } finally {
-        el.style.opacity = '1';
+        if (newEl) newEl.style.opacity = '1';
         if (waveform) waveform.classList.remove('animating');
     }
 }

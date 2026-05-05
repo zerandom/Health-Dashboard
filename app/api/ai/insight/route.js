@@ -2,6 +2,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { getSupabaseAdmin } from '@/lib/supabase';
 import { NextResponse } from 'next/server';
+import { TRAINING_COACH_SYSTEM_PROMPT, buildTrainingCoachDataPrompt } from '@/lib/prompts';
+import { retrieveLiteratureContext } from '@/lib/rag';
 
 // GET /api/ai/insight — personalized Training Coach AI
 export async function GET(request) {
@@ -228,40 +230,38 @@ export async function GET(request) {
 
   const loadPct = loadCeiling > 0 ? Math.min(Math.round((currentWeekLoad / loadCeiling) * 100), 300) : 0;
   const loadPctLabel = loadPct >= 300 ? '>300% (significantly over ceiling)' : `${loadPct}% of ceiling`;
-  const SYSTEM_PROMPT = `You are EKATRA Coach — a no-fluff, data-first personal training advisor.
-Your only job is to interpret this athlete's own biometric data and deliver one clear daily directive.
-Rules you must never break:
-- Never give generic health advice. Every sentence must reference a specific number from the data.
-- Never add disclaimers ("as an AI", "consult a doctor", "I am not a medical professional").
-- Never deviate from the 4-point output format below.
-- Biometric data overrides subjective feeling. If HRV is crashed, do not recommend hard training even if energy is 9/10.
-- Max 200 words total across all 4 points.`;
+  // ── 6. RAG RETRIEVAL ─────────────────────────────────────────────────────
+  const ragQuery = [
+    today_hrv < avg_hrv * 0.9  ? 'HRV drop below baseline recovery protocol' : '',
+    parseFloat(stressDebtDelta) < -4 ? 'accumulated training fatigue management' : '',
+    loadPct > 100  ? 'overreaching and overtraining prevention' : '',
+    `${day_of_week} workout recommendation ${today_sleep_hrs < 6.5 ? 'with poor sleep' : ''}`
+  ].filter(Boolean).join(', ');
 
-  const DATA_PROMPT = `TODAY: ${today_date} (${day_of_week})
+  const literatureContext = await retrieveLiteratureContext(ragQuery, null, 3);
 
-ATHLETE BASELINES (last 30 days)
-- Avg HRV: ${avg_hrv} ms  |  Avg RHR: ${avg_rhr} bpm
-- Personal recovery window: ${recoveryWindow}h after hard sessions
-- Weekly load ceiling: ${loadCeiling} min  |  This week so far: ${currentWeekLoad.toFixed(0)} min (${loadPctLabel})
-
-LAST 7 DAYS
-${seven_day_table}
-
-TODAY'S READINESS
-- HRV: ${today_hrv} ms  |  RHR: ${today_rhr} bpm
-- Sleep: ${today_sleep_hrs}h, bedtime ${today_bedtime}${sleepEfficiency !== null ? `, efficiency ${sleepEfficiency}%` : ''}
-- Subjective energy: ${energy}/10
-- Notes: ${notes}
-
-PHYSIOLOGICAL SIGNALS
-- ${stressDebtNarrative}
-${corrNarratives.length > 0 ? corrNarratives.map(c => `- Personal pattern: ${c}`).join('\n') : ''}
-
-REQUIRED OUTPUT FORMAT (use exactly these labels, in this order):
-1. Readiness: [Green / Amber / Red] — [one sentence citing the specific number(s) that drove this score]
-2. Today: [train hard / train easy / active recovery / full rest] — [2-3 sentences referencing MY specific data]
-3. Watch: [one metric + threshold to monitor over the next 3 days]
-4. Pattern: [one observation from the 7-day log I might be missing]`;
+  const SYSTEM_PROMPT = TRAINING_COACH_SYSTEM_PROMPT;
+  const DATA_PROMPT = buildTrainingCoachDataPrompt({
+    today_date,
+    day_of_week,
+    avg_hrv,
+    avg_rhr,
+    recoveryWindow,
+    loadCeiling,
+    currentWeekLoad: currentWeekLoad.toFixed(0),
+    loadPctLabel,
+    seven_day_table,
+    today_hrv,
+    today_rhr,
+    today_sleep_hrs,
+    today_bedtime,
+    sleepEfficiency,
+    energy,
+    notes,
+    stressDebtNarrative,
+    corrNarratives,
+    literatureContext
+  });
 
   // ── 7. AI FETCH ──────────────────────────────────────────────────────────
   const cleanKey = (TARGET_API_KEY || '').trim().replace(/[\s"']/g, '');

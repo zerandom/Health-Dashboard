@@ -45,3 +45,46 @@ alter table habit_tags enable row level security;
 
 -- Service role bypasses RLS automatically in Supabase.
 -- No additional policies needed for server-side operations.
+
+-- ── RAG (Retrieval-Augmented Generation) ──────────────────────────────────────
+-- Enable pgvector extension
+create extension if not exists vector;
+
+-- Coaching literature store
+create table if not exists coaching_literature (
+  id          bigint generated always as identity primary key,
+  source      text not null,         
+  category    text not null,         
+  chunk_text  text not null,         
+  embedding   vector(768) not null,  
+  created_at  timestamptz default now()
+);
+
+-- IVFFlat index for fast approximate nearest-neighbour search
+create index if not exists coaching_literature_embedding_idx on coaching_literature
+  using ivfflat (embedding vector_cosine_ops)
+  with (lists = 100);
+
+-- Similarity search RPC
+create or replace function match_literature(
+  query_embedding  vector(768),
+  match_count      int     default 3,
+  filter_category  text    default null
+)
+returns table (
+  id         bigint,
+  source     text,
+  category   text,
+  chunk_text text,
+  similarity float
+)
+language sql stable
+as $$
+  select
+    id, source, category, chunk_text,
+    1 - (embedding <=> query_embedding) as similarity
+  from coaching_literature
+  where (filter_category is null or category = filter_category)
+  order by embedding <=> query_embedding
+  limit match_count;
+$$;

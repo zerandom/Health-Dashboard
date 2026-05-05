@@ -96,21 +96,40 @@ export default function DashboardClient({ user }) {
           {/* ── Dashboard Section ── */}
           <section id="dashboard" className="view-section active">
             <div className="bento-grid">
+              {/* FITNESS AGE (Hero Bento) */}
               <div className="bento-card span-2 row-2">
-                <h2 className="panel-title">READINESS SCORE</h2>
-                <div className="readiness-container">
-                  <svg className="readiness-rings-svg" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
-                    <circle className="readiness-ring ring-bg" cx="50" cy="50" r="40"></circle>
-                    <circle className="readiness-ring ring-recovery glow-violet" id="ring-recovery" cx="50" cy="50" r="40" strokeDasharray="0 251.2"></circle>
-                    <circle className="readiness-ring ring-bg" cx="50" cy="50" r="30"></circle>
-                    <circle className="readiness-ring ring-strain glow-coral" id="ring-strain" cx="50" cy="50" r="30" strokeDasharray="0 188.4"></circle>
-                  </svg>
-                  <div className="readiness-content">
-                    <div className="data-primary" id="dash-recovery-score">88</div>
-                    <div className="page-subtitle">Optimal</div>
+                <h2 className="panel-title">FITNESS AGE</h2>
+                <div className="fitness-age-container">
+                  {/* Rings column */}
+                  <div className="rings-col">
+                    <svg className="readiness-rings-svg" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+                      <circle className="readiness-ring ring-bg" cx="50" cy="50" r="40"></circle>
+                      <circle className="readiness-ring ring-recovery glow-violet" id="ring-recovery" cx="50" cy="50" r="40" strokeDasharray="0 251.2"></circle>
+                      <circle className="readiness-ring ring-bg" cx="50" cy="50" r="30"></circle>
+                      <circle className="readiness-ring ring-strain glow-coral" id="ring-strain" cx="50" cy="50" r="30" strokeDasharray="0 188.4"></circle>
+                    </svg>
+                    <div className="readiness-content">
+                      <div className="data-primary" id="dash-fitness-age">--</div>
+                      <div className="fitness-age-label">Fitness Age</div>
+                    </div>
+                  </div>
+                  {/* Right stats */}
+                  <div className="fitness-age-stats">
+                    <div className="fitness-age-stat-row">
+                      <div className="panel-title">READINESS</div>
+                      <div className="data-primary" style={{ fontSize: '2rem' }} id="dash-recovery-score">--</div>
+                      <div className="kpi-subtext" id="fitness-age-readiness-label">Calculating...</div>
+                    </div>
+                    <div className="fitness-age-divider"></div>
+                    <div className="fitness-age-stat-row">
+                      <div className="panel-title">TRAJECTORY</div>
+                      <div className="data-primary" style={{ fontSize: '1.5rem' }} id="dash-fitness-age-trend">--</div>
+                      <div className="kpi-subtext">vs calendar age</div>
+                    </div>
                   </div>
                 </div>
               </div>
+
 
               <div className="bento-card span-2 ai-coach-card">
                 <div className="card-header-flex">

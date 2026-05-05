@@ -61,19 +61,36 @@
             <section id="dashboard" class="view-section active">
                 <div class="bento-grid">
                     
-                    <!-- Readiness Score (Hero Bento) -->
+                    <!-- Fitness Age (Hero Bento) -->
                     <div class="bento-card span-2 row-2">
-                        <h2 class="panel-title">READINESS SCORE</h2>
-                        <div class="readiness-container">
-                            <svg class="readiness-rings-svg" viewBox="0 0 100 100" style="transform: rotate(-90deg);">
-                                <circle class="readiness-ring ring-bg" cx="50" cy="50" r="40"></circle>
-                                <circle class="readiness-ring ring-recovery glow-violet" id="ring-recovery" cx="50" cy="50" r="40" stroke-dasharray="0 251.2"></circle>
-                                <circle class="readiness-ring ring-bg" cx="50" cy="50" r="30"></circle>
-                                <circle class="readiness-ring ring-strain glow-coral" id="ring-strain" cx="50" cy="50" r="30" stroke-dasharray="0 188.4"></circle>
-                            </svg>
-                            <div class="readiness-content">
-                                <div class="data-primary" id="dash-recovery-score">88</div>
-                                <div class="page-subtitle">Optimal</div>
+                        <h2 class="panel-title">FITNESS AGE</h2>
+                        <div class="fitness-age-container">
+                            <!-- Rings column -->
+                            <div class="rings-col">
+                                <svg class="readiness-rings-svg" viewBox="0 0 100 100" style="transform: rotate(-90deg);">
+                                    <circle class="readiness-ring ring-bg" cx="50" cy="50" r="40"></circle>
+                                    <circle class="readiness-ring ring-recovery glow-violet" id="ring-recovery" cx="50" cy="50" r="40" stroke-dasharray="0 251.2"></circle>
+                                    <circle class="readiness-ring ring-bg" cx="50" cy="50" r="30"></circle>
+                                    <circle class="readiness-ring ring-strain glow-coral" id="ring-strain" cx="50" cy="50" r="30" stroke-dasharray="0 188.4"></circle>
+                                </svg>
+                                <div class="readiness-content">
+                                    <div class="data-primary" id="dash-fitness-age">--</div>
+                                    <div class="fitness-age-label">Fitness Age</div>
+                                </div>
+                            </div>
+                            <!-- Right stats -->
+                            <div class="fitness-age-stats">
+                                <div class="fitness-age-stat-row">
+                                    <div class="panel-title">READINESS</div>
+                                    <div class="data-primary" style="font-size: 2rem;" id="dash-recovery-score">--</div>
+                                    <div class="kpi-subtext" id="fitness-age-readiness-label">Calculating...</div>
+                                </div>
+                                <div class="fitness-age-divider"></div>
+                                <div class="fitness-age-stat-row">
+                                    <div class="panel-title">TRAJECTORY</div>
+                                    <div class="data-primary" style="font-size: 1.5rem;" id="dash-fitness-age-trend">--</div>
+                                    <div class="kpi-subtext" id="fitness-age-trend-label">vs calendar age</div>
+                                </div>
                             </div>
                         </div>
                     </div>
