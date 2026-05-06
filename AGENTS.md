@@ -53,3 +53,10 @@ When executing complex tasks (e.g., major architecture changes, building integra
 1. **Identify the Session:** Find the current or most relevant `<conversation-id>` folder in the `brain` directory.
 2. **Absorb Context:** Read through `knowledge/` first. If mid-task, read `implementation_plan.md` and `task.md`.
 3. **Execute & Update:** Pick up the unfinished items in `task.md`, make code changes, and keep the artifacts updated to maintain the chain of memory for the next agent.
+
+## 🛡️ Security & Secrets (MANDATORY)
+
+- **NEVER use `git add .`**: Always run `git status` and specifically add files you have intentionally modified. Broad `add` commands risk staging untracked scratch files containing hardcoded secrets.
+- **Respect `.gitignore`**: Ensure `scratch/`, `.env.local`, and any data directories are never tracked.
+- **No Hardcoded Keys**: If testing, always load from `process.env` or `.env.local`. Do not paste raw keys into scripts, even in `scratch/`.
+- **Double-Check Before Push**: Verify the list of staged files before committing and pushing.
