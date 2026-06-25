@@ -356,11 +356,11 @@ class HealthParser {
                 if (onProgress) onProgress(offset, fileSize);
 
                 const chunk = tail + e.target.result;
-                const lastBoundary = chunk.lastIndexOf('/>');
+                const lastBoundary = chunk.lastIndexOf('>');
                 
                 let processable = '';
                 if (lastBoundary !== -1) {
-                    const splitIdx = lastBoundary + 2; 
+                    const splitIdx = lastBoundary + 1; 
                     processable = chunk.substring(0, splitIdx);
                     tail = chunk.substring(splitIdx);
                 } else {
