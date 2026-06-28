@@ -127,8 +127,7 @@ async function loadDataWithPriority() {
             state.data = json;
             state.isDemo = false;
             const days = json.dates.length;
-            const src  = json._source === 'xml_browser_stream' ? 'XML Export' : json._source;
-            setStatusBadge(`${src} · ${days} days`, true);
+            setStatusBadge(`${days} days of Recorded data`, true);
             await overlayLiveSync();
             return true;
         } else if (json.dataSource && json.dataSource !== 'none' && json.dates && json.dates.length > 0) {
@@ -137,8 +136,7 @@ async function loadDataWithPriority() {
                 state.data   = parsed;
                 state.isDemo = false;
                 const days = json.dates.length;
-                const src  = json.dataSource === 'xml' ? 'XML Export' : json.dataSource;
-                setStatusBadge(`${src} · ${days} days`, true);
+                setStatusBadge(`${days} days of Recorded data`, true);
                 // Try to overlay live sync on top
                 await overlayLiveSync();
                 return true;
