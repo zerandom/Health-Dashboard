@@ -8,7 +8,7 @@ export async function POST(req) {
   const DATA_PROMPT = buildSleepAnalystDataPrompt(data);
 
   const cleanKey = (process.env.COACH_GEMINI_KEY || process.env.GOOGLE_API_KEY || '').trim().replace(/[\s"']/g, '');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent`;
   
   try {
     const res = await fetch(url, {

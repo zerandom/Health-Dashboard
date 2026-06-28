@@ -26,8 +26,8 @@
                 <li data-target="sleep-recovery">Sleep & Recovery</li>
                 <li data-target="workouts">Workouts</li>
                 <li data-target="habits-experiments">Habits & Experiments</li>
-                <li data-target="circadian">Circadian</li>
-                <li data-target="data-import">Data Import</li>
+                <li data-target="circadian" style="display: none;">Circadian</li>
+                <li data-target="data-import" style="display: none;">Data Import</li>
             </ul>
 
             <div class="data-management-sidebar">
@@ -50,6 +50,9 @@
                     <p class="page-subtitle" id="date-subtitle">March 22</p>
                 </div>
                 <div class="header-actions">
+                    <button id="settings-btn" class="btn-icon-only" title="Settings" onclick="toggleSettingsModal(true)">
+                        <span class="icon-settings" style="font-size: 1.2rem;">⚙️</span>
+                    </button>
                     <button id="sync-now-btn" class="btn-sync">Sync Now</button>
                     <div class="user-badge">
                         <div class="avatar"></div>
@@ -245,7 +248,7 @@
                                 <span class="badge-lite">Full Dataset Analysis</span>
                             </div>
                             <div class="ai-content-box" style="min-height: 120px;">
-                                <p id="sleep-long-term-insight" class="insight-text">Analyzing long-term sleep architecture and biometric correlations...</p>
+                                <div id="sleep-long-term-insight" class="insight-text">Analyzing long-term sleep architecture and biometric correlations...</div>
                             </div>
                         </div>
                     </div>
@@ -347,10 +350,7 @@
                     <div class="bento-card span-full">
                         <div class="card-header-flex">
                             <h2 class="panel-title">HABIT IMPACT MATRIX</h2>
-                            <label class="lag-toggle" title="Calculates effects on the biometrics for the day after the habit">
-                                <input type="checkbox" id="lag-toggle-cb" checked>
-                                <span class="lag-toggle-label">Next-day Effect</span>
-                            </label>
+
                         </div>
                         <p class="kpi-subtext">Select a habit to see its exact mathematical dividend or tax on your core biometrics.</p>
                         
@@ -451,9 +451,32 @@
             </div>
         </div>
 
+        <!-- Settings Modal Overlay -->
+        <div id="settings-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>User Settings</h3>
+                    <button class="btn-close" onclick="toggleSettingsModal(false)">✕</button>
+                </div>
+                
+                <div style="margin-top: 1rem; margin-bottom: 2rem;">
+                    <label for="goal-select" style="display:block; margin-bottom:0.5rem; color:var(--color-text-secondary);">Primary Training Goal</label>
+                    <select id="goal-select" class="neon-select" style="background:var(--color-bg-void); color:white; border: 1px solid var(--color-border-card); padding: 0.5rem 1rem; border-radius: 8px; width: 100%; font-weight: 500;">
+                        <option value="General Fitness">General Fitness</option>
+                        <option value="Marathon / Triathlon">Marathon / Triathlon</option>
+                        <option value="Cycling / Endurance">Cycling / Endurance</option>
+                        <option value="Strength & Hypertrophy">Strength & Hypertrophy</option>
+                        <option value="Weight Loss">Weight Loss</option>
+                    </select>
+                </div>
+                
+                <button class="btn-primary" style="width: 100%;" onclick="saveUserGoal()">Save Changes</button>
+            </div>
+        </div>
+
     </div>
     
-    <script src="parser.js?v=4"></script>
+    <script src="parser.v2.js"></script>
     <script src="app.js?v=4"></script>
 </body>
 </html>

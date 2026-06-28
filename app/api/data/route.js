@@ -53,10 +53,11 @@ export async function POST(req) {
     const userEmail = session.user.email.toLowerCase();
 
     // Self-healing: Ensure user exists in Supabase
-    await supabase.from('users').upsert(
-      { email: userEmail, name: session.user.name, avatar_url: session.user.image },
+    const { error: userError } = await supabase.from('users').upsert(
+      { email: userEmail, name: session.user.name || 'User', avatar_url: session.user.image || '' },
       { onConflict: 'email' }
     );
+    if (userError) console.warn('Failed to upsert user:', userError);
 
     const { error } = await supabase
       .from('health_data')

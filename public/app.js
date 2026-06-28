@@ -105,6 +105,7 @@ window.initLegacyApp = async () => {
     await loadTagsFromServer();
 
     updateUI();
+    initAiChat();
 };
 
 if (document.readyState === 'loading') {
@@ -1375,7 +1376,25 @@ async function fetchAIInsight(energy = null, note = null) {
         const res = await fetch(`/api/ai/insight?energy=${eVal}&note=${nVal}`);
         const json = await res.json();
         
-        if (json.insight && newEl) {
+        if (json.insight && typeof json.insight === 'object' && container) {
+            const { readiness, today, watch, pattern } = json.insight;
+            container.innerHTML = `
+                <div style="display:flex; flex-direction:column; gap:12px; margin-top:8px;">
+                    <div>
+                        <div style="font-weight:600; margin-bottom:4px; color: ${readiness?.status?.toLowerCase() === 'green' ? '#10b981' : (readiness?.status?.toLowerCase() === 'yellow' ? '#f59e0b' : '#ef4444')}">Readiness: ${readiness?.status || 'Unknown'}</div>
+                        <div style="font-size:0.95rem; opacity:0.9;">${readiness?.reason || ''}</div>
+                    </div>
+                    ${today ? `
+                    <div style="padding:10px; background:var(--color-bg-tertiary); border-radius:6px; border-left: 3px solid var(--color-accent-primary);">
+                        <div style="font-weight:600; margin-bottom:4px;">Action: ${today.directive || ''}</div>
+                        <div style="font-size:0.9rem; opacity:0.85;">${today.detail || ''}</div>
+                    </div>
+                    ` : ''}
+                    ${watch ? `<div style="font-size:0.9rem; opacity:0.8;">⚠️ Watch: ${watch}</div>` : ''}
+                    ${pattern ? `<div style="font-size:0.9rem; opacity:0.8;">📈 Pattern: ${pattern}</div>` : ''}
+                </div>
+            `;
+        } else if (json.insight && newEl) {
             newEl.innerText = json.insight;
         } else if (newEl) {
             newEl.innerText = "The AI Coach is currently unavailable. Check your connection.";
@@ -1441,49 +1460,56 @@ function renderCharts(sectionId) {
 }
 
 async function fetchCombinedAIInsight() {
-    // Guard: only run once per session; the two real target elements
+    // Guard: only run once per session
     if (state.combinedAiLoaded) return;
 
     const shortEl = document.getElementById('sleep-short-term-insight');
     const longEl  = document.getElementById('sleep-long-term-insight');
-    if (!shortEl && !longEl) return;  // not on the sleep tab yet
+    if (!shortEl && !longEl) return;
     state.combinedAiLoaded = true;
 
-    // Show loading state
-    const loading = `<span style="color:var(--color-text-secondary);font-style:italic;">✦ Analyzing your biometric data…</span>`;
-    if (shortEl) shortEl.innerHTML = loading;
-    if (longEl)  longEl.innerHTML  = loading;
+    // Use local engine for both (faster, highly structured UI, no API cost)
+    if (state.data) {
+        const engine = new InsightEngine(state.data);
+        if (shortEl) shortEl.innerHTML = engine.getSleepShortTerm() || 'No short-term data.';
+        if (longEl) {
+             longEl.innerHTML = engine.getSleepLongTerm() || 'No long-term data.';
+             // If we have enough data, kick off the asynchronous AI deep dive
+             if (engine.n >= 90) {
+                 fetchAIMacroInsight(longEl);
+             }
+        }
+    } else {
+        if (shortEl) shortEl.innerHTML = 'No data available yet.';
+        if (longEl)  longEl.innerHTML  = 'No data available yet.';
+    }
+}
 
+async function fetchAIMacroInsight(longEl) {
+    if (!longEl) return;
     try {
-        const res  = await fetch('/api/ai/sleep-insight');
+        const res = await fetch('/api/ai/macro-insight');
         const json = await res.json();
-
         if (json.insight) {
-            // The Gemini endpoint returns a single combined insight — put the full
-            // response in the short-term box (weekly context) and use the local
-            // InsightEngine for the long-term box.
-            if (shortEl) shortEl.innerHTML = json.insight;
-
-            // Long-term: use local engine (it's fast, no API cost)
-            if (longEl && state.data) {
-                const engine   = new InsightEngine(state.data);
-                const longText = engine.getSleepLongTerm();
-                longEl.innerHTML = longText || 'Analyzing long-term sleep patterns…';
+            const { title, insight, mechanism } = json.insight;
+            const container = longEl.querySelector('div');
+            if (container) {
+                const aiCard = document.createElement('div');
+                aiCard.style.marginTop = "8px";
+                aiCard.style.padding = "12px";
+                aiCard.style.background = "rgba(245, 158, 11, 0.05)";
+                aiCard.style.border = "1px solid rgba(245, 158, 11, 0.2)";
+                aiCard.style.borderRadius = "8px";
+                aiCard.innerHTML = `
+                    <div style="margin-bottom:8px;"><span class="badge-lite" style="border-color:#f59e0b; color:#f59e0b; font-weight:600;">✨ AI Deep Dive: ${title}</span></div>
+                    <div style="font-size:0.95rem; opacity:0.95; line-height:1.5; margin-bottom:8px;">${insight}</div>
+                    <div style="font-size:0.9rem; opacity:0.8; line-height:1.4; border-left: 2px solid rgba(245, 158, 11, 0.3); padding-left: 10px;"><em>Mechanism:</em> ${mechanism}</div>
+                `;
+                container.appendChild(aiCard);
             }
-        } else {
-            throw new Error('No insight in response');
         }
     } catch (e) {
-        // API unavailable / no key — fall back entirely to local engine
-        console.warn('[AI] Sleep insight API unavailable, using local engine:', e.message);
-        if (state.data) {
-            const engine = new InsightEngine(state.data);
-            if (shortEl) shortEl.innerHTML = engine.getSleepShortTerm() || 'No short-term data.';
-            if (longEl)  longEl.innerHTML  = engine.getSleepLongTerm()  || 'No long-term data.';
-        } else {
-            if (shortEl) shortEl.innerHTML = 'No data available yet.';
-            if (longEl)  longEl.innerHTML  = 'No data available yet.';
-        }
+        console.warn('[AI Macro] Failed to fetch macro insight:', e);
     }
 }
 
@@ -2161,18 +2187,16 @@ function renderCorrelatorChart(canvasId = 'correlatorChart', s1Id = 'corr-metric
     const isTag1 = s1Val.startsWith('tag_');
     if (isTag1) {
         const tag = s1Val.replace('tag_', '');
-        const lagEnabled = document.getElementById('lag-toggle-cb')?.checked || false;
 
         // Use rawDates (ISO) for tag lookups; fall back to display dates
         const allDates = d.rawDates || d.dates;
         const fullMetric = getMetric(s2Val);
 
-        // When lag is enabled: habit on day N → biometric on day N+1
-        // So we check tags[N] against metric[N+1]
+        // Same-day comparison: habit on day N vs biometric on day N
         const windowSize = 90;
-        const start = Math.max(0, allDates.length - windowSize - (lagEnabled ? 1 : 0));
-        const datesWindow  = allDates.slice(start, allDates.length - (lagEnabled ? 1 : 0));
-        const metricWindow = fullMetric.slice(start + (lagEnabled ? 1 : 0));
+        const start = Math.max(0, allDates.length - windowSize);
+        const datesWindow  = allDates.slice(start);
+        const metricWindow = fullMetric.slice(start);
 
         if (!d.tags) d.tags = {};
 
@@ -2206,9 +2230,8 @@ function renderCorrelatorChart(canvasId = 'correlatorChart', s1Id = 'corr-metric
         if (rValEl) rValEl.innerText = `${sign}${diffPct}%`;
 
         const interp = document.getElementById('corr-interpretation');
-        const lagNote = lagEnabled ? ' (next-day effect)' : '';
         if (interp) {
-            interp.innerText = `On days you log '${tName1}', your ${mName2}${lagNote} averages ${avgWith}. Without it: ${avgWithout} (${sign}${diffPct}% delta).`;
+            interp.innerText = `On days you log '${tName1}', your ${mName2} averages ${avgWith}. Without it: ${avgWithout} (${sign}${diffPct}% delta).`;
         }
 
         // Sample size warning
@@ -2362,82 +2385,335 @@ class InsightEngine {
     getSleepShortTerm() {
         const d = this.d;
         const lastIdx = this.n - 1;
-        if (lastIdx < 7) return "Analyzing your first week of SleepOS data to establish a valid baseline...";
+        if (lastIdx < 7) return "<div class='kpi-subtext'>Analyzing your first week of SleepOS data to establish a valid baseline...</div>";
 
+        // Calculate 7-day averages
+        const weekStartIndex = Math.max(0, lastIdx - 6);
+        const weekLength = lastIdx - weekStartIndex + 1;
+        
+        let totalEff = 0;
+        let totalVol = 0;
+        
+        for (let i = weekStartIndex; i <= lastIdx; i++) {
+            totalEff += this.signals.efficiency[i] || 0;
+            totalVol += ((d.sleep.deep[i] || 0) + (d.sleep.rem[i] || 0) + (d.sleep.core[i] || 0)) / 60;
+        }
+        
+        const avgEff = Math.round(totalEff / weekLength);
+        const avgVol = Math.round((totalVol / weekLength) * 10) / 10;
         const hrvVel = this.signals.velocity.hrv[lastIdx];
-        const efficiency = this.signals.efficiency[lastIdx];
-        const lastDeep = d.sleep.deep[lastIdx];
-        const avgDeep = d.averages.deep[lastIdx];
+
+        let html = `<div style="display:flex; flex-direction:column; gap:12px;">`;
+
+        // Weekly Snapshot Card
+        html += `
+            <div style="background:rgba(255,255,255,0.03); border:1px solid var(--color-border-card); border-radius:8px; padding:12px;">
+                <div class="kpi-subtext" style="margin-bottom:8px; font-weight:600; font-size:0.75rem; letter-spacing:0.05em; text-transform:uppercase;">7-DAY SNAPSHOT</div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:0.9rem;">Avg Efficiency: <span class="data-primary" style="font-size:1.1rem; margin-left:4px;">${avgEff}%</span></span>
+                    <span style="font-size:0.9rem;">Avg Volume: <span class="data-primary" style="font-size:1.1rem; margin-left:4px;">${avgVol}h</span></span>
+                </div>
+            </div>
+        `;
+
+        // Trend Layer
+        let trendColor = hrvVel > 2 ? 'var(--color-accent-primary)' : (hrvVel < -2 ? '#ef4444' : 'var(--color-text-base)');
+        let trendText = hrvVel > 2 ? 'Accelerating (7-day HRV outpacing 14-day baseline)' : (hrvVel < -2 ? 'Decelerating (autonomic pressure mounting)' : 'Stable');
+        html += `
+            <div style="display:flex; align-items:flex-start; gap:8px;">
+                <span class="badge-lite" style="color:${trendColor}; border-color:${trendColor}; flex-shrink:0;">Velocity</span>
+                <span style="font-size:0.9rem; opacity:0.9; line-height:1.4;">Recovery is <b>${trendText}</b>.</span>
+            </div>
+        `;
         
-        let insights = [];
-
-        // Descriptive Layer (What)
-        insights.push(`<b>Snapshot</b>: Efficiency is at ${efficiency}% with a total sleep volume of ${Math.round(((lastDeep + d.sleep.rem[lastIdx] + d.sleep.core[lastIdx])/60)*10)/10}h.`);
-
-        // Trend Layer (Velocity)
-        if (hrvVel > 2) insights.push("Recovery is <b>Accelerating</b>; your 7-day HRV trend is outpacing your 14-day baseline.");
-        else if (hrvVel < -2) insights.push("Recovery is <b>Decelerating</b>; autonomic pressure is mounting.");
+        // Habit Attribution Layer (Weekly scan)
+        let alcoholCount = 0;
+        let saunaCount = 0;
+        for (let i = weekStartIndex; i <= lastIdx; i++) {
+            const dateKey = (d.dates && d.dates[i]);
+            const tags = (d.tags && dateKey) ? (d.tags[dateKey] || []) : [];
+            if (tags.includes('alcohol')) alcoholCount++;
+            if (tags.includes('sauna')) saunaCount++;
+        }
         
-        // Habit Attribution Layer (NEW)
-        const dateKey = (d.dates && d.dates[lastIdx]);
-        const tonightTags = (d.tags && dateKey) ? (d.tags[dateKey] || []) : [];
-        if (tonightTags.includes('alcohol')) {
-            const impact = getTagImpact('alcohol', 'hrv');
-            insights.push(`<span style="color:var(--color-accent-primary)"><b>P0 Activity</b>: Alcohol detected. Historical tax on your recovery for this habit is ${impact || '-20%'}. Expect suppressed REM.</span>`);
+        if (alcoholCount > 0) {
+            html += `
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                    <span class="badge-lite" style="color:#ef4444; border-color:#ef4444; flex-shrink:0;">Habit Alert</span>
+                    <span style="font-size:0.9rem; opacity:0.9; line-height:1.4;">Alcohol logged <b>${alcoholCount}x</b> this week, suppressing REM and HRV.</span>
+                </div>
+            `;
         }
-        if (tonightTags.includes('sauna')) {
-            const impact = getTagImpact('sauna', 'hrv');
-            insights.push(`<b>Pulse Grid</b>: Sauna session logged. This habit typically yields a ${impact || '+10%'} Dividend for your HRV.`);
+        if (saunaCount > 0) {
+            html += `
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                    <span class="badge-lite" style="color:var(--color-accent-primary); border-color:var(--color-accent-primary); flex-shrink:0;">Habit Boost</span>
+                    <span style="font-size:0.9rem; opacity:0.9; line-height:1.4;">Sauna logged <b>${saunaCount}x</b> this week, yielding HRV dividends.</span>
+                </div>
+            `;
         }
-
-        if (efficiency < 85) insights.push(`<b>Diagnostic</b>: Sleep Efficiency is ${efficiency}%. Suboptimal window usage; check for 'Late Night' patterns.`);
-
 
         // Diagnostic Layer (Alerts)
-        if (this.signals.debt.deep[lastIdx]) {
-            insights.push("<span style='color:var(--color-accent-primary)'><b>P0 ALERT: deep debt detected.</b></span> 3+ nights of suboptimal physical restoration found.");
+        let deepDebtDays = 0;
+        for (let i = weekStartIndex; i <= lastIdx; i++) {
+            if (this.signals.debt.deep[i]) deepDebtDays++;
         }
-
-        const remPct = (d.sleep.rem[lastIdx] / (lastDeep + d.sleep.rem[lastIdx] + d.sleep.core[lastIdx])) * 100;
-        if (remPct < 15) insights.push("<b>Diagnostic</b>: REM Suppression detected (<15%). This may impact cognitive agility today.");
-
-        return insights.join(" <br><br> ");
+        if (deepDebtDays >= 3) {
+            html += `
+                <div style="display:flex; align-items:flex-start; gap:8px; margin-top:4px;">
+                    <span class="badge-lite" style="background:#ef444422; color:#ef4444; border:1px solid #ef4444; flex-shrink:0;">P0 Alert</span>
+                    <span style="font-size:0.9rem; color:#ffb3b3; line-height:1.4;">Deep sleep debt detected (${deepDebtDays} nights of suboptimal physical restoration).</span>
+                </div>
+            `;
+        }
+        
+        html += `</div>`;
+        return html;
     }
 
     getSleepLongTerm() {
         const d = this.d;
-        if (this.n < 14) return "Historical synthesis requires 14+ days of data for high-confidence pattern recognition.";
+        if (this.n < 14) return "<div class='kpi-subtext'>Historical synthesis requires 14+ days of data for high-confidence pattern recognition.</div>";
 
-        let findings = [];
+        let html = `<div style="display:flex; flex-direction:column; gap:16px;">`;
+
+        // Macro-Historical Patterns (if n > 90)
+        if (this.n > 90) {
+            const jetlag = this._detectSocialJetlag();
+            if (jetlag) {
+                html += `
+                    <div>
+                        <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:#3b82f6; color:#3b82f6;">Macro Pattern: Social Jetlag</span></div>
+                        <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">${jetlag}</div>
+                    </div>
+                `;
+            }
+
+            const seasonality = this._detectSeasonality();
+            if (seasonality) {
+                html += `
+                    <div>
+                        <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:#10b981; color:#10b981;">Macro Pattern: Seasonality</span></div>
+                        <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">${seasonality}</div>
+                    </div>
+                `;
+            }
+
+            const burnout = this._detectBurnoutCycles();
+            if (burnout) {
+                html += `
+                    <div>
+                        <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:#ef4444; color:#ef4444;">Macro Pattern: Burnout Cycle</span></div>
+                        <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">${burnout}</div>
+                    </div>
+                `;
+            }
+            
+            const apex = this._detectApexHabit();
+            if (apex) {
+                 html += `
+                    <div>
+                        <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:var(--color-accent-primary); color:var(--color-accent-primary);">Apex Habit</span></div>
+                        <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">${apex}</div>
+                    </div>
+                `;
+            }
+        }
+
 
         // Diagnostic & Pattern recognition
         const bedtimeVsDeep = this._calculateCorrelation(d.sleepBedtimes, d.sleep.deep);
         if (Math.abs(bedtimeVsDeep) > 0.4) {
-            findings.push("<b>Circadian Drift Impact</b>: Your data shows a strong link between bedtime consistency and Deep sleep yields. Every 30m shift in onset reduces physical repair by ~12%.");
+            html += `
+                <div>
+                    <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:#a855f7; color:#a855f7;">Circadian Drift</span></div>
+                    <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">Your data shows a strong link between bedtime consistency and Deep sleep yields. Every 30m shift in onset reduces physical repair by ~12%.</div>
+                </div>
+            `;
         }
 
         // Alcohol / Illness Fingerprinting
         const fingerprints = this.signals.fingerprints.filter(f => f.date > this.n - 14);
         if (fingerprints.some(f => f.type === 'ALCOHOL_SIGNATURE')) {
-            findings.push("<b>Biometric Pattern</b>: A recurring 'Alcohol Signature' (Deep collapse + RHR spike) is disrupting your weekend recovery cycles.");
+             html += `
+                <div>
+                    <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:#f59e0b; color:#f59e0b;">Biometric Pattern</span></div>
+                    <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">A recurring 'Alcohol Signature' (Deep collapse + RHR spike) is disrupting your weekend recovery cycles.</div>
+                </div>
+            `;
         }
 
         // Predictive Layer
         const hrvVelocity = this.signals.velocity.hrv.slice(-3);
         const isTrendingUp = hrvVelocity.every(v => v > 0);
         if (isTrendingUp) {
-            findings.push("<b>Forecasting</b>: Baseline is on an upward trajectory. Expect an 'Optimal readiness' window in 48-72 hours.");
+            html += `
+                <div>
+                    <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:var(--color-accent-primary); color:var(--color-accent-primary);">Forecasting</span></div>
+                    <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">Baseline is on an upward trajectory. Expect an 'Optimal readiness' window in 48-72 hours.</div>
+                </div>
+            `;
         } else {
-            findings.push("<b>Forecasting</b>: Current signal velocity suggests a plateau. Recommend a 20% reduction in training load to reset baseline.");
+             html += `
+                <div>
+                    <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:var(--color-text-secondary); color:var(--color-text-secondary);">Forecasting</span></div>
+                    <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">Current signal velocity suggests a plateau. Recommend a 20% reduction in training load to reset baseline.</div>
+                </div>
+            `;
         }
 
         // Lost Core Check
         const totalCore = d.sleep.core.reduce((a, b) => a + b, 0) / this.n;
         if (totalCore < 180) { // < 3h avg
-            findings.push("<b>Diagnostic</b>: 'Lost Core' pattern detected. Low maintenance sleep is hindering memory consolidation.");
+            html += `
+                <div>
+                    <div style="margin-bottom:6px;"><span class="badge-lite" style="border-color:#ef4444; color:#ef4444;">Diagnostic</span></div>
+                    <div style="font-size:0.95rem; opacity:0.9; line-height:1.5;">'Lost Core' pattern detected. Low maintenance sleep is hindering memory consolidation.</div>
+                </div>
+            `;
         }
 
-        return findings.join(" <br><br> ");
+        html += `</div>`;
+        return html;
+    }
+
+    _detectSocialJetlag() {
+        const d = this.d;
+        let weekdayDeep = [];
+        let weekendDeep = [];
+        let weekdayBedtime = [];
+        let weekendBedtime = [];
+
+        for (let i = 0; i < this.n; i++) {
+            if (!d.dates[i]) continue;
+            const dateObj = new Date(d.dates[i]);
+            const day = dateObj.getDay();
+            
+            const isWeekend = (day === 5 || day === 6); // Fri/Sat night
+            const isWeekday = (day >= 1 && day <= 4);   // Mon-Thu night
+            
+            const deep = d.sleep.deep[i] || 0;
+            const bedtime = parseTimeToMins(d.sleepBedtimes[i], true);
+            
+            if (isWeekend) {
+                weekendDeep.push(deep);
+                if (bedtime) weekendBedtime.push(bedtime);
+            } else if (isWeekday) {
+                weekdayDeep.push(deep);
+                if (bedtime) weekdayBedtime.push(bedtime);
+            }
+        }
+
+        if (weekdayDeep.length < 10 || weekendDeep.length < 10) return null;
+
+        const avgWkdayDeep = weekdayDeep.reduce((a,b)=>a+b,0) / weekdayDeep.length;
+        const avgWkendDeep = weekendDeep.reduce((a,b)=>a+b,0) / weekendDeep.length;
+        
+        const avgWkdayBedtime = weekdayBedtime.reduce((a,b)=>a+b,0) / weekdayBedtime.length;
+        const avgWkendBedtime = weekendBedtime.reduce((a,b)=>a+b,0) / weekendBedtime.length;
+
+        const bedtimeDiffMins = Math.round(avgWkendBedtime - avgWkdayBedtime);
+        const deepDiffPct = Math.round(((avgWkendDeep - avgWkdayDeep) / (avgWkdayDeep || 1)) * 100);
+
+        if (Math.abs(bedtimeDiffMins) > 45 && Math.abs(deepDiffPct) > 5) {
+            const shiftDir = bedtimeDiffMins > 0 ? 'later' : 'earlier';
+            const costDir = deepDiffPct < 0 ? 'costing you' : 'gaining you';
+            return `Over the long term, your weekend bedtimes shift by an average of <b>${Math.abs(bedtimeDiffMins)} minutes ${shiftDir}</b>, ${costDir} <b>${Math.abs(deepDiffPct)}%</b> of your Deep sleep compared to weekdays.`;
+        }
+        return null;
+    }
+
+    _detectSeasonality() {
+        const d = this.d;
+        let monthlyVolume = {};
+        let monthlyCount = {};
+        
+        for (let i = 0; i < this.n; i++) {
+            if (!d.dates[i]) continue;
+            const month = new Date(d.dates[i]).getMonth();
+            const vol = (d.sleep.deep[i] || 0) + (d.sleep.rem[i] || 0) + (d.sleep.core[i] || 0);
+            
+            if (!monthlyVolume[month]) {
+                monthlyVolume[month] = 0;
+                monthlyCount[month] = 0;
+            }
+            monthlyVolume[month] += vol;
+            monthlyCount[month]++;
+        }
+        
+        let winterVol = 0, winterCount = 0;
+        let summerVol = 0, summerCount = 0;
+        
+        [11, 0, 1].forEach(m => {
+            if (monthlyVolume[m]) { winterVol += monthlyVolume[m]; winterCount += monthlyCount[m]; }
+        });
+        [5, 6, 7].forEach(m => {
+            if (monthlyVolume[m]) { summerVol += monthlyVolume[m]; summerCount += monthlyCount[m]; }
+        });
+        
+        if (winterCount < 14 || summerCount < 14) return null;
+        
+        const avgWinter = (winterVol / winterCount) / 60;
+        const avgSummer = (summerVol / summerCount) / 60;
+        const diffMins = Math.round(Math.abs(avgWinter - avgSummer) * 60);
+        
+        if (diffMins > 20) {
+            const higher = avgWinter > avgSummer ? "Winter (Dec-Feb)" : "Summer (Jun-Aug)";
+            const lower = avgWinter > avgSummer ? "Summer (Jun-Aug)" : "Winter (Dec-Feb)";
+            return `Your sleep volume shows natural seasonality. You average <b>${diffMins} minutes more sleep</b> in ${higher} compared to ${lower}.`;
+        }
+        return null;
+    }
+
+    _detectBurnoutCycles() {
+        const d = this.d;
+        if (this.n < 90) return null;
+        
+        const eff = this.signals.efficiency;
+        let recent30 = eff.slice(-30).reduce((a,b)=>a+b,0) / 30;
+        let prev60 = eff.slice(-90, -30).reduce((a,b)=>a+b,0) / 60;
+        
+        if (prev60 > 85 && recent30 < prev60 - 4) {
+             return `You've historically sustained high sleep efficiency (${Math.round(prev60)}%), but your last 30 days have dropped to ${Math.round(recent30)}%. You may be entering a burnout trough; prioritize recovery.`;
+        }
+        return null;
+    }
+
+    _detectApexHabit() {
+        const d = this.d;
+        let tagImpacts = {};
+        
+        for (let i = 0; i < this.n; i++) {
+            const dateKey = d.dates[i];
+            const tags = (d.tags && dateKey) ? (d.tags[dateKey] || []) : [];
+            const hrv = this.signals.velocity.hrv[i] || 0;
+            
+            tags.forEach(t => {
+                if (!tagImpacts[t]) tagImpacts[t] = { sum: 0, count: 0 };
+                tagImpacts[t].sum += hrv;
+                tagImpacts[t].count++;
+            });
+        }
+        
+        let bestTag = null;
+        let bestScore = -999;
+        let bestCount = 0;
+        
+        for (const [tag, data] of Object.entries(tagImpacts)) {
+            if (data.count > 15) {
+                const avg = data.sum / data.count;
+                if (avg > bestScore && avg > 1) {
+                    bestScore = avg;
+                    bestTag = tag;
+                    bestCount = data.count;
+                }
+            }
+        }
+        
+        if (bestTag) {
+            return `Across your dataset, <b>'${bestTag}'</b> emerges as your Apex Habit. Logged ${bestCount} times, it yields the highest statistical dividend for your HRV recovery.`;
+        }
+        return null;
     }
 
     _calculateCorrelation(arr1, arr2) {
@@ -2462,148 +2738,260 @@ class InsightEngine {
 
 // ── 15. Sprint 7: Habit Impact Matrix ─────────────────────────────────────────
 
+// Normalizes Apple Health workout type strings to friendly display names
+function normalizeWorkoutType(type) {
+    const map = {
+        'Running': 'Running',
+        'Cycling': 'Cycling',
+        'Walking': 'Walking',
+        'Swimming': 'Swimming',
+        'Hiking': 'Hiking',
+        'Rowing': 'Rowing',
+        'Yoga': 'Yoga',
+        'HIIT': 'HIIT',
+        'FunctionalStrengthTraining': 'Strength Training',
+        'TraditionalStrengthTraining': 'Strength Training',
+        'CoreTraining': 'Core Training',
+        'CrossTraining': 'Cross Training',
+        'MixedCardio': 'Mixed Cardio',
+        'StairClimbing': 'Stair Climbing',
+        'Elliptical': 'Elliptical',
+        'HighIntensityIntervalTraining': 'HIIT',
+        'Soccer': 'Soccer',
+        'Basketball': 'Basketball',
+        'Tennis': 'Tennis',
+        'Badminton': 'Badminton',
+        'Squash': 'Squash',
+        'Pilates': 'Pilates',
+        'Dance': 'Dance',
+        'Cooldown': 'Cooldown',
+        'Other': 'Other Workout',
+    };
+    // Direct match
+    if (map[type]) return map[type];
+    // Strip Apple Health prefix e.g. "HKWorkoutActivityType"
+    const stripped = type.replace(/^HKWorkoutActivityType/, '');
+    if (map[stripped]) return map[stripped];
+    // CamelCase to words as last resort
+    return stripped.replace(/([A-Z])/g, ' $1').trim();
+}
+
 window.initHabitImpactMatrix = function() {
     const select = document.getElementById('habit-impact-select');
     if (!select) return;
 
-    // 1. Gather all historically used unique tags
+    // 1. Start with the master habits list (stored from server in localStorage)
     let availableTags = [];
-    if (state.data && state.data.tags) {
-        availableTags = [...new Set(Object.values(state.data.tags).flat())];
-    }
-    
-    // Sort alphabetically
-    availableTags.sort();
-    
-    // Populate select
-    select.innerHTML = '<option value="" disabled selected>— Select a Habit —</option>';
-    availableTags.forEach(tag => {
-        const opt = document.createElement('option');
-        opt.value = opt.innerText = tag;
-        select.appendChild(opt);
-    });
+    try {
+        const stored = localStorage.getItem('10x_habits');
+        if (stored) availableTags = JSON.parse(stored);
+    } catch (e) {}
 
-    // Lag toggle behavior
-    const lagCb = document.getElementById('lag-toggle-cb');
-    if (lagCb) {
-        lagCb.onchange = () => {
-            if (select.value) analyzeHabitImpact(select.value);
-        };
+    // 2. We intentionally do not gather historically logged tags to keep the dropdown relevant to chosen habits only.
+
+    // 3. Fallback: default starter habits if nothing else available
+    if (availableTags.length === 0) {
+        availableTags = ['alcohol', 'supplements', 'sauna', 'cold_plunge', 'heavy_leg_day'];
+    }
+
+    // 4. Auto-discover workout types from parsed data that appear >= 4 times
+    const workoutOptions = []; // { value: 'workout:Running', label: 'Running', count }
+    const d = state.data;
+    if (d && d.workouts && d.workouts.detailed) {
+        const typeCounts = {};
+        d.workouts.detailed.forEach(dayList => {
+            if (!Array.isArray(dayList)) return;
+            // De-duplicate per day so one session doesn't skew counts
+            const seenToday = new Set();
+            dayList.forEach(w => {
+                const normalized = normalizeWorkoutType(w.type || 'Other');
+                if (!seenToday.has(normalized)) {
+                    seenToday.add(normalized);
+                    typeCounts[normalized] = (typeCounts[normalized] || 0) + 1;
+                }
+            });
+        });
+        Object.entries(typeCounts)
+            .filter(([, count]) => count >= 4)
+            .sort((a, b) => b[1] - a[1]) // most frequent first
+            .forEach(([label, count]) => {
+                workoutOptions.push({ value: `workout:${label}`, label: `${label} (${count}×)` });
+            });
+    }
+
+    // Sort habits alphabetically
+    availableTags.sort();
+
+    // Populate select — habits group
+    select.innerHTML = '<option value="" disabled selected>— Select a Habit or Workout —</option>';
+
+    if (availableTags.length > 0) {
+        const habitGroup = document.createElement('optgroup');
+        habitGroup.label = '💊 Habits & Lifestyle';
+        availableTags.forEach(tag => {
+            const opt = document.createElement('option');
+            opt.value = tag;
+            opt.innerText = tag;
+            habitGroup.appendChild(opt);
+        });
+        select.appendChild(habitGroup);
+    }
+
+    // Workout types group
+    if (workoutOptions.length > 0) {
+        const workoutGroup = document.createElement('optgroup');
+        workoutGroup.label = '🏃 Workout Types';
+        workoutOptions.forEach(({ value, label }) => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.innerText = label;
+            workoutGroup.appendChild(opt);
+        });
+        select.appendChild(workoutGroup);
     }
 
     // Trigger analysis on change
     select.onchange = (e) => {
-        analyzeHabitImpact(e.target.value);
+        if (e.target.value) analyzeHabitImpact(e.target.value);
     };
 };
 
+
 window.analyzeHabitImpact = function(tagName) {
     const d = state.data;
-    if (!d || !d.tags) return;
-    
+    if (!d) return;
+
     const resultsContainer = document.getElementById('habit-impact-results');
     const emptyContainer = document.getElementById('habit-impact-empty');
     if (!resultsContainer || !emptyContainer) return;
 
-    const useLag = document.getElementById('lag-toggle-cb')?.checked || false;
-
-    // We will separate the data into "days with habit" (Target) vs "days without habit in the last 180 days" (Baseline)
-    let targetHrv = [], targetRhr = [], targetEff = [], targetDeep = [];
-    let baseHrv = [], baseRhr = [], baseEff = [], baseDeep = [];
-
-    // Find all indexes where this tag exists
-    let targetIndexes = [];
+    // Use rawDates (ISO format) for all lookups; d.dates is display-only
     const dates = d.dates || [];
-    for (let i = 0; i < dates.length; i++) {
-        const dateStr = dates[i];
-        const dayTags = d.tags[dateStr] || [];
-        if (dayTags.includes(tagName)) {
-            let evalIndex = useLag ? i + 1 : i; // Check the exact day, or the day immediately following
-            if (evalIndex < dates.length) {
-                targetIndexes.push(evalIndex);
+    const rawDates = d.rawDates || dates;
+
+    const isWorkout = tagName.startsWith('workout:');
+    const workoutLabel = isWorkout ? tagName.replace('workout:', '') : null;
+
+    // Find all indexes where this habit/workout occurred
+    let targetIndexes = [];
+    let timesLogged = 0;
+    for (let i = 0; i < rawDates.length; i++) {
+        let matched = false;
+        if (isWorkout) {
+            const dayList = d.workouts?.detailed?.[i];
+            if (Array.isArray(dayList)) {
+                matched = dayList.some(w => normalizeWorkoutType(w.type || 'Other') === workoutLabel);
             }
+        } else {
+            if (!d.tags) break;
+            const dayTags = d.tags[rawDates[i]] || [];
+            matched = dayTags.includes(tagName);
+        }
+
+        if (matched) {
+            timesLogged++;
+            targetIndexes.push(i);
         }
     }
 
-    // Statistical significance threshold (minimum 4 logs)
+    // Need at least 4 instances with enough prior history for a rolling avg
     if (targetIndexes.length < 4) {
         resultsContainer.classList.add('hidden');
         emptyContainer.classList.remove('hidden');
-        emptyContainer.innerHTML = `<div style="font-size:2.5rem; margin-bottom:1rem;">📉</div><div class="kpi-subtext">Not enough data. You have logged <strong>${tagName}</strong> ${targetIndexes.length} times.<br>The engine requires at least 4 instances to calculate a mathematical signal.</div>`;
+        const label = isWorkout ? workoutLabel : tagName;
+        const subtext = `Not enough data. <strong>${label}</strong> was recorded ${timesLogged} time${timesLogged !== 1 ? 's' : ''}.<br>The engine requires at least 4 instances to calculate a mathematical signal.`;
+        emptyContainer.innerHTML = `<div style="font-size:2.5rem; margin-bottom:1rem;">📉</div><div class="kpi-subtext">${subtext}</div>`;
         return;
     }
 
-    // Calculate target array metrics
+    // ── Rolling Average Delta ──────────────────────────────────────────────
+    // For each day the habit occurred, measure how each metric deviates from
+    // the user's own 14-day rolling average ending the day before (i-14 to i-1).
+    // This eliminates contamination from other workouts in the baseline pool.
+
+    const WINDOW = 14;
+    const hrv   = d.recovery.hrv;
+    const rhr   = d.recovery.rhr;
+    const eff   = d.signals?.efficiency || [];
+    const deep  = d.sleep?.deep || [];
+
+    // Compute rolling average of an array ending just before index i (exclusive)
+    const rollingAvg = (arr, i, window = WINDOW) => {
+        const start = Math.max(0, i - window);
+        const slice = arr.slice(start, i).filter(v => v != null && v > 0);
+        return slice.length >= 3 ? slice.reduce((a, b) => a + b, 0) / slice.length : null;
+    };
+
+    // Accumulate per-metric deltas across all habit instances
+    const deltas = { hrv: [], rhr: [], eff: [], deep: [] };
+    const actuals = { hrv: [], rhr: [], eff: [], deep: [] };
+    const norms   = { hrv: [], rhr: [], eff: [], deep: [] };
+
     targetIndexes.forEach(idx => {
-        if (d.recovery.hrv[idx]) targetHrv.push(d.recovery.hrv[idx]);
-        if (d.recovery.rhr[idx]) targetRhr.push(d.recovery.rhr[idx]);
-        if (d.signals && d.signals.efficiency && d.signals.efficiency[idx]) targetEff.push(d.signals.efficiency[idx]);
-        if (d.sleep && d.sleep.deep && d.sleep.deep[idx]) targetDeep.push(d.sleep.deep[idx]);
+        const metrics = [
+            { key: 'hrv',  arr: hrv,  val: hrv[idx]  },
+            { key: 'rhr',  arr: rhr,  val: rhr[idx]  },
+            { key: 'eff',  arr: eff,  val: eff[idx]  },
+            { key: 'deep', arr: deep, val: deep[idx] },
+        ];
+        metrics.forEach(({ key, arr, val }) => {
+            if (val == null || val === 0) return; // skip missing values
+            const norm = rollingAvg(arr, idx);
+            if (norm === null) return; // not enough history
+            deltas[key].push(val - norm);
+            actuals[key].push(val);
+            norms[key].push(norm);
+        });
     });
 
-    // Calculate baseline. To isolate the variable, baseline is days WITHOUT this habit over the last 6 months.
-    for (let i = Math.max(0, dates.length - 180); i < dates.length; i++) {
-        let isTargetDay = false;
-        if (useLag) {
-            const prevDate = i > 0 ? dates[i-1] : null;
-            const prevTags = prevDate ? (d.tags[prevDate] || []) : [];
-            isTargetDay = prevTags.includes(tagName);
-        } else {
-            const currDate = dates[i];
-            const currTags = d.tags[currDate] || [];
-            isTargetDay = currTags.includes(tagName);
-        }
+    const _avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
 
-        if (!isTargetDay) {
-            if (d.recovery.hrv[i]) baseHrv.push(d.recovery.hrv[i]);
-            if (d.recovery.rhr[i]) baseRhr.push(d.recovery.rhr[i]);
-            if (d.signals && d.signals.efficiency && d.signals.efficiency[i]) baseEff.push(d.signals.efficiency[i]);
-            if (d.sleep && d.sleep.deep && d.sleep.deep[i]) baseDeep.push(d.sleep.deep[i]);
-        }
-    }
-
-    const _avg = (arr) => arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0;
-    
-    const hrvBase = _avg(baseHrv), hrvTgt = _avg(targetHrv);
-    const rhrBase = _avg(baseRhr), rhrTgt = _avg(targetRhr);
-    const effBase = _avg(baseEff), effTgt = _avg(targetEff);
-    const deepBase = _avg(baseDeep), deepTgt = _avg(targetDeep);
-
-    const renderCard = (id, base, tgt, higherIsBetter, unit) => {
-        const el = document.getElementById('impact-' + id);
+    const renderCard = (id, deltaArr, actualArr, normArr, higherIsBetter, unit, isTime) => {
+        const el    = document.getElementById('impact-' + id);
         const rawEl = document.getElementById('impact-' + id + '-raw');
         if (!el || !rawEl) return;
-        
-        if (base === 0 || tgt === 0) {
-            el.innerText = '--';
-            rawEl.innerText = 'No Data';
+
+        const meanDelta  = _avg(deltaArr);
+        const meanActual = _avg(actualArr);
+        const meanNorm   = _avg(normArr);
+        const n          = deltaArr.length;
+
+        if (meanDelta === null || meanNorm === null || meanNorm === 0) {
+            el.innerText   = '--';
+            rawEl.innerText = 'Not enough history';
+            el.style.color  = 'var(--color-text-secondary)';
             return;
         }
 
-        const pct = ((tgt - base) / base) * 100;
-        const abs = Math.abs(pct).toFixed(1);
-        let arrow = pct > 0 ? '↑' : '↓';
-        let isPositive = higherIsBetter ? pct > 0 : pct < 0;
+        const pct       = (meanDelta / meanNorm) * 100;
+        const absPct    = Math.abs(pct).toFixed(1);
+        const arrow     = pct > 0 ? '↑' : '↓';
+        const isPositive = higherIsBetter ? pct > 0 : pct < 0;
 
-        el.innerText = `${arrow} ${abs}%`;
-        
-        // Ensure colors apply properly
-        el.style.color = isPositive ? 'var(--color-accent-tertiary)' : 'var(--color-accent-primary)';
+        el.innerText    = `${arrow} ${absPct}%`;
+        el.style.color  = isPositive ? 'var(--color-accent-tertiary)' : 'var(--color-accent-primary)';
 
-        // Deep sleep is in minutes, convert to hours/mins for raw
-        if (id === 'deep') {
-            const bH = Math.floor(base/60), bM = Math.round(base%60);
-            const tH = Math.floor(tgt/60), tM = Math.round(tgt%60);
-            rawEl.innerText = `${tH}h ${tM}m vs ${bH}h ${bM}m`;
+        // Raw line: show absolute delta + n
+        if (isTime) {
+            // Deep sleep in minutes → h m format
+            const sign   = meanDelta >= 0 ? '+' : '-';
+            const absMins = Math.abs(Math.round(meanDelta));
+            const h      = Math.floor(absMins / 60);
+            const m      = absMins % 60;
+            const deltaStr = h > 0 ? `${sign}${h}h ${m}m` : `${sign}${m}m`;
+            const aboveBelow = meanDelta >= 0 ? 'above' : 'below';
+            rawEl.innerText = `${deltaStr} ${aboveBelow} your norm · ${n} day${n !== 1 ? 's' : ''} logged`;
         } else {
-            rawEl.innerText = `${Math.round(tgt)}${unit} vs ${Math.round(base)}${unit}`;
+            const sign      = meanDelta >= 0 ? '+' : '';
+            const aboveBelow = meanDelta >= 0 ? 'above' : 'below';
+            rawEl.innerText = `${sign}${meanDelta.toFixed(1)}${unit} ${aboveBelow} your norm · ${n} day${n !== 1 ? 's' : ''} logged`;
         }
     };
 
-    renderCard('hrv', hrvBase, hrvTgt, true, 'ms');
-    renderCard('rhr', rhrBase, rhrTgt, false, 'bpm');
-    renderCard('efficiency', effBase, effTgt, true, '%');
-    renderCard('deep', deepBase, deepTgt, true, '');
+    renderCard('hrv',        deltas.hrv,  actuals.hrv,  norms.hrv,  true,  'ms',  false);
+    renderCard('rhr',        deltas.rhr,  actuals.rhr,  norms.rhr,  false, 'bpm', false);
+    renderCard('efficiency', deltas.eff,  actuals.eff,  norms.eff,  true,  '%',   false);
+    renderCard('deep',       deltas.deep, actuals.deep, norms.deep, true,  '',    true);
 
     emptyContainer.classList.add('hidden');
     resultsContainer.classList.remove('hidden');
@@ -2713,4 +3101,193 @@ function getTagColor(name) {
     let hash = 0;
     for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
     return defaultColors[Math.abs(hash) % defaultColors.length];
+}
+
+// ── Recovered: Feedback UI, Anomaly Check, AI Chat ────────────────────────────
+
+function attachFeedbackUI(container, surface, regenCallback) {
+    // Remove existing feedback UI if any
+    const existing = container.querySelector('.insight-feedback');
+    if (existing) existing.remove();
+
+    const fb = document.createElement('div');
+    fb.className = 'insight-feedback';
+    fb.innerHTML = `
+        <button class="fb-btn thumbs-up" data-rating="1">👍</button>
+        <button class="fb-btn thumbs-down" data-rating="-1">👎</button>
+        <span class="fb-label">Was this useful?</span>
+    `;
+
+    container.appendChild(fb);
+
+    const buttons = fb.querySelectorAll('.fb-btn');
+    buttons.forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const rating = parseInt(btn.getAttribute('data-rating'), 10);
+            
+            buttons.forEach(b => {
+                b.disabled = true;
+                b.style.opacity = '0.3';
+                b.style.cursor = 'not-allowed';
+            });
+            const label = fb.querySelector('.fb-label');
+            
+            if (rating === 1) {
+                btn.style.opacity = '1';
+                if (label) label.innerText = 'Thank you for your feedback!';
+                try {
+                    await fetch('/api/ai/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ surface, rating, insight_snapshot: {} })
+                    });
+                } catch (err) {
+                    console.error('Failed to submit feedback', err);
+                }
+            } else {
+                btn.style.opacity = '1';
+                if (label) label.innerText = 'Regenerating...';
+                try {
+                    await fetch('/api/ai/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ surface, rating, insight_snapshot: {} })
+                    });
+                } catch (err) {
+                    console.error('Failed to submit feedback', err);
+                }
+                if (typeof regenCallback === 'function') {
+                    setTimeout(() => { regenCallback(); }, 1000);
+                }
+            }
+        });
+    });
+}
+
+async function checkHrvAnomaly() {
+    const card = document.getElementById('anomaly-card');
+    const textEl = document.getElementById('anomaly-insight-text');
+    if (!card || !textEl) return;
+    try {
+        const res = await fetch('/api/ai/anomaly');
+        const json = await res.json();
+        if (json.anomaly) {
+            textEl.innerText = json.anomaly;
+            card.style.display = 'block';
+        } else {
+            card.style.display = 'none';
+        }
+    } catch (err) {
+        console.error('[AI] Anomaly check error:', err);
+        card.style.display = 'none';
+    }
+}
+
+function initAiChat() {
+    const fab = document.getElementById('fab-ai-chat');
+    const drawer = document.getElementById('ai-chat-drawer');
+    const closeBtn = document.getElementById('chat-drawer-close');
+    const sendBtn = document.getElementById('chat-drawer-send');
+    const input = document.getElementById('chat-drawer-input');
+    const msgContainer = document.getElementById('chat-drawer-messages');
+
+    if (!fab || !drawer || !closeBtn || !sendBtn || !input || !msgContainer) return;
+
+    let chatMessages = [
+        { role: 'assistant', content: "Hello! I have secure access to your 30-day Apple Watch biometrics (HRV, RHR, Deep/REM sleep) and logged workouts/habits. Ask me to identify trends or correlations!" }
+    ];
+
+    const overlay = document.getElementById('ai-chat-overlay');
+    const fabIcon = fab.querySelector('.fab-icon');
+
+    const toggleChat = (show) => {
+        if (show) {
+            drawer.classList.add('active');
+            if (overlay) overlay.style.display = 'block';
+            if (fabIcon) fabIcon.innerText = '✕';
+            input.focus();
+        } else {
+            drawer.classList.remove('active');
+            if (overlay) overlay.style.display = 'none';
+            if (fabIcon) fabIcon.innerText = '💬';
+        }
+    };
+
+    fab.addEventListener('click', () => {
+        const isOpen = drawer.classList.contains('active');
+        toggleChat(!isOpen);
+    });
+
+    closeBtn.addEventListener('click', () => { toggleChat(false); });
+
+    if (overlay) {
+        overlay.addEventListener('click', () => toggleChat(false));
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && drawer.classList.contains('active')) {
+            toggleChat(false);
+        }
+    });
+
+    const scrollToBottom = () => { msgContainer.scrollTop = msgContainer.scrollHeight; };
+
+    const addMessageBubble = (role, text) => {
+        const bubble = document.createElement('div');
+        bubble.className = `chat-msg ${role}`;
+        let html = text
+            .replace(/\n/g, '<br>')
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        bubble.innerHTML = html;
+        msgContainer.appendChild(bubble);
+        scrollToBottom();
+    };
+
+    const sendMessage = async () => {
+        const text = input.value.trim();
+        if (!text) return;
+
+        addMessageBubble('user', text);
+        chatMessages.push({ role: 'user', content: text });
+        input.value = '';
+        input.disabled = true;
+        sendBtn.disabled = true;
+
+        const loader = document.createElement('div');
+        loader.className = 'chat-msg coach';
+        loader.id = 'chat-msg-loading-bubble';
+        loader.innerHTML = `<div class="chat-msg-loader"><span></span><span></span><span></span></div>`;
+        msgContainer.appendChild(loader);
+        scrollToBottom();
+
+        try {
+            const res = await fetch('/api/ai/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ messages: chatMessages })
+            });
+            const data = await res.json();
+            loader.remove();
+            if (res.ok && data.text) {
+                addMessageBubble('coach', data.text);
+                chatMessages.push({ role: 'assistant', content: data.text });
+            } else {
+                addMessageBubble('coach', data.error || 'Sorry, I encountered an issue retrieving my advice.');
+            }
+        } catch (err) {
+            console.error('Chat error:', err);
+            loader.remove();
+            addMessageBubble('coach', 'Connection lost. Please make sure the server is online.');
+        } finally {
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
+    };
+
+    sendBtn.addEventListener('click', sendMessage);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { sendMessage(); }
+    });
 }

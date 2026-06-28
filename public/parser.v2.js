@@ -252,6 +252,7 @@ class HealthParser {
             const sleepSegmentsByDate = {}; // New session-based collection
             const wByDate     = {};
             const detailedWByDate = {};
+            const generalDates = new Set();
 
             let dob = null;
             let maxObservedHr = 0;
@@ -422,6 +423,7 @@ class HealthParser {
                         lDate = fullDateStr.split(' ')[0] || fullDateStr.split('T')[0];
                     }
                     if (!lDate || lDate.length < 10) continue;
+                    generalDates.add(lDate);
 
                     if (isWorkout) {
                         const durMatch = durRegex.exec(tagContent);
@@ -510,16 +512,18 @@ class HealthParser {
                 const sDates = Object.keys(sleepSegmentsByDate);
                 const hardwareDateStrings = [...new Set([...hDates, ...rDates])].sort();
                 
-                if (hardwareDateStrings.length === 0 && hDates.length === 0 && rDates.length === 0) {
-                    console.error("[Parser] Critical Failure: No wearable data found among", recordCount, "records.");
+                const allCollectedDates = [...new Set([
+                    ...hDates, ...rDates, ...sDates, ...Object.keys(wByDate), ...generalDates
+                ])].sort();
+
+                if (allCollectedDates.length === 0) {
+                    console.error("[Parser] Critical Failure: No data found among", recordCount, "records.");
                     resolve(HealthParser.buildFromServerParsed({ dates: [] }));
                     return;
                 }
 
-                const firstHardwareDate = hardwareDateStrings[0] || (sDates[0] || Object.keys(wByDate)[0]);
-                const allDates = [...new Set([
-                    ...hDates, ...rDates, ...sDates, ...Object.keys(wByDate)
-                ])].sort().filter(d => d >= firstHardwareDate);
+                const firstHardwareDate = hardwareDateStrings[0] || (sDates[0] || Object.keys(wByDate)[0] || allCollectedDates[0]);
+                const allDates = allCollectedDates.filter(d => d >= firstHardwareDate);
 
                 // Run Heuristic: Cluster segments into Primary Night sessions vs Naps
                 const finalSleepByDate = {};

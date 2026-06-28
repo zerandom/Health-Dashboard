@@ -6,10 +6,14 @@ import { SLEEP_ANALYST_SYSTEM_PROMPT, buildSleepAnalystDataPrompt } from '@/lib/
 import { retrieveLiteratureContext } from '@/lib/rag';
 
 // GET /api/ai/sleep-insight — dual-layer sleep & recovery analysis
-export async function GET() {
+export async function GET(request) {
   const TARGET_API_KEY = process.env.COACH_GEMINI_KEY;
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  const regen = searchParams.get('regen') === '1';
+  const temperature = regen ? 0.7 : 0.4;
 
   if (!TARGET_API_KEY || TARGET_API_KEY === 'your_gemini_api_key_here' || TARGET_API_KEY.length < 10) {
     console.error(`[Sleep AI] API Key Missing or Invalid. Key exists: ${!!TARGET_API_KEY}`);
@@ -18,13 +22,20 @@ export async function GET() {
 
   const supabase = getSupabaseAdmin();
   const userEmail = session.user.email.toLowerCase();
+  const todayKey = new Date().toISOString().split('T')[0];
+
   const { data } = await supabase
     .from('health_data')
-    .select('payload')
+    .select('payload, ai_cache')
     .eq('user_email', userEmail)
     .single();
 
   if (!data?.payload) return NextResponse.json({ insight: 'No data found.' });
+
+  const cached = data.ai_cache?.sleep_insight;
+  if (!regen && cached?.date === todayKey && cached?.insight) {
+    return NextResponse.json({ insight: cached.insight, cached: true });
+  }
 
   const payload = data.payload;
   const lookback = 14;
@@ -81,6 +92,18 @@ export async function GET() {
   const bedtimeStdDevMins = stdDev(bedMins);
   const bedtimeQuality = bedtimeStdDevMins < 30 ? 'Excellent' : bedtimeStdDevMins < 60 ? 'Good' : 'Irregular';
 
+  const dailyMins = payload.workoutMinutes || [];
+  const weeklyLoadMins = dailyMins.slice(-7).reduce((a,b) => a + (b||0), 0);
+  const workoutsDetailed = payload.workouts || [];
+  const lastHardSession = (() => {
+    for (let i = workoutsDetailed.length - 1; i >= 0; i--) {
+      const ws = workoutsDetailed[i] || [];
+      const hard = ws.find(w => (w.avgHR > 0.8 * 180) || w.duration > 60);
+      if (hard) return `${payload.dates[i]}: ${hard.type} ${hard.duration}m`;
+    }
+    return 'None in last 14 days';
+  })();
+
   const ragQuery = [
     avgTotal < 7 ? 'sleep deprivation recovery' : '',
     avgDeep < 60 ? 'deep sleep optimization human growth hormone' : '',
@@ -95,11 +118,12 @@ export async function GET() {
     avgDeep, avgREM, avgCore, avgTotal, avgEfficiency,
     hrvTrend, hrvTrendDir, avgRHR,
     bedtimeStdDevMins, bedtimeQuality,
-    summary, literatureContext
+    summary, literatureContext,
+    weeklyLoadMins, loadPctLabel: `${Math.round((weeklyLoadMins/500)*100)}%`, lastHardSession
   });
 
   const cleanKey = (TARGET_API_KEY || '').trim().replace(/[\s"']/g, '');
-  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let insight = null;
   let lastError = null;
 
@@ -116,7 +140,7 @@ export async function GET() {
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: [{ parts: [{ text: DATA_PROMPT }] }],
           generationConfig: {
-            temperature: 0.4,
+            temperature,
             maxOutputTokens: 600,
             ...(model.includes('2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {})
           },
@@ -138,7 +162,12 @@ export async function GET() {
     }
   }
 
-  if (insight) return NextResponse.json({ insight });
+  if (insight) {
+    await supabase.from('health_data')
+      .update({ ai_cache: { ...(data.ai_cache || {}), sleep_insight: { date: todayKey, insight } } })
+      .eq('user_email', userEmail);
+    return NextResponse.json({ insight });
+  }
   return NextResponse.json({
     insight: `Sleep Analyst failed to initialize. Try again in a few minutes. (Debug: ${lastError})`,
     is_mock: true

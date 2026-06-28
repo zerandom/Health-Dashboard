@@ -14,6 +14,8 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const energy = searchParams.get('energy') || 'Not provided';
   const notes = searchParams.get('note') || 'Not provided';
+  const regen = searchParams.get('regen') === '1';
+  const temperature = regen ? 0.7 : 0.4;
 
   if (!TARGET_API_KEY || TARGET_API_KEY === 'your_gemini_api_key_here' || TARGET_API_KEY.length < 10) {
     console.error(`[AI Coach] API Key Missing or Invalid. Key exists: ${!!TARGET_API_KEY}`);
@@ -22,6 +24,14 @@ export async function GET(request) {
 
   const supabase = getSupabaseAdmin();
   const userEmail = session.user.email.toLowerCase();
+
+  if (notes !== 'Not provided') {
+    const todayKey = new Date().toISOString().split('T')[0];
+    await supabase.from('tags').upsert(
+      { user_email: userEmail, date: todayKey, notes },
+      { onConflict: 'user_email, date' }
+    );
+  }
   const { data } = await supabase
     .from('health_data')
     .select('payload')
@@ -240,7 +250,20 @@ export async function GET(request) {
 
   const literatureContext = await retrieveLiteratureContext(ragQuery, null, 3);
 
-  const SYSTEM_PROMPT = TRAINING_COACH_SYSTEM_PROMPT;
+  // ── 5b. RETRIEVE LAST 3 DAYS OF USER NOTES FROM SUPABASE ──────────────────
+  const { data: recentTagData } = await supabase
+    .from('tags')
+    .select('date, notes')
+    .eq('user_email', userEmail)
+    .order('date', { ascending: false })
+    .limit(3);
+
+  const recentNotes = (recentTagData || []).map(row =>
+    row.notes ? `${row.date}: ${row.notes}` : null
+  ).filter(Boolean);
+
+  const userGoal = p.user?.goal || 'General fitness';
+  const SYSTEM_PROMPT = TRAINING_COACH_SYSTEM_PROMPT(userGoal);
   const DATA_PROMPT = buildTrainingCoachDataPrompt({
     today_date,
     day_of_week,
@@ -260,12 +283,13 @@ export async function GET(request) {
     notes,
     stressDebtNarrative,
     corrNarratives,
-    literatureContext
+    literatureContext,
+    recentNotes
   });
 
   // ── 7. AI FETCH ──────────────────────────────────────────────────────────
   const cleanKey = (TARGET_API_KEY || '').trim().replace(/[\s"']/g, '');
-  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const models = ['gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let insight = null;
   let lastError = null;
 
@@ -286,8 +310,9 @@ export async function GET(request) {
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: [{ role: 'user', parts: [{ text: DATA_PROMPT }] }],
           generationConfig: {
-            temperature: 0.4,
+            temperature,
             maxOutputTokens: 1024,
+            responseMimeType: 'application/json',
             // Disable thinking for 2.5 models — thinking tokens consume output budget
             ...(model.includes('2.5') ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
           },
@@ -299,7 +324,13 @@ export async function GET(request) {
       console.log(`[AI Coach] ${model} → status ${res.status}, candidates: ${!!json.candidates?.[0]}`);
 
       if (res.ok && json.candidates?.[0]) {
-        insight = json.candidates[0].content.parts[0].text.trim();
+        const raw = json.candidates[0].content.parts[0].text.trim();
+        try {
+          insight = JSON.parse(raw); // structured object
+        } catch {
+          // Model drifted — wrap as legacy text for graceful degradation
+          insight = { readiness: { status: 'Unknown', reason: raw }, today: { directive: 'unknown', detail: raw }, watch: '', pattern: '' };
+        }
         break;
       } else {
         throw new Error(json.error?.message || `HTTP ${res.status}: no candidates`);

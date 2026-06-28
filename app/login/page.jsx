@@ -69,6 +69,20 @@ export default function LoginPage() {
           Continue with Google
         </button>
 
+        <button
+          id="dev-signin-btn"
+          style={{
+            ...styles.googleBtn,
+            background: 'rgba(143,0,255,0.06)',
+            borderColor: 'rgba(143,0,255,0.25)',
+            color: '#A78BFA',
+            boxShadow: 'none'
+          }}
+          onClick={() => signIn('credentials', { email: 'rahul.rathee17@gmail.com', callbackUrl: '/dashboard' })}
+        >
+          🔧 Developer Quick Sign-In
+        </button>
+
         <p style={styles.disclaimer}>
           Your health data is stored securely and is never shared or sold.
           By signing in you agree to our{' '}

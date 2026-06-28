@@ -21,7 +21,7 @@ export default function DashboardClient({ user }) {
       {/* Load Chart.js and plugin before app.js */}
       <Script src="https://cdn.jsdelivr.net/npm/chart.js" strategy="beforeInteractive" />
       <Script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation" strategy="beforeInteractive" />
-      <Script src={`/parser.js?v=${Date.now()}`} strategy="beforeInteractive" />
+      <Script src={`/parser.v2.js?v=${Date.now()}`} strategy="beforeInteractive" />
       <Script src={`/app.js?v=${Date.now()}`} strategy="afterInteractive" />
 
       <div className="app-container">
@@ -36,8 +36,8 @@ export default function DashboardClient({ user }) {
             <li data-target="sleep-recovery">Sleep &amp; Recovery</li>
             <li data-target="workouts">Workouts</li>
             <li data-target="habits-experiments">Habits &amp; Experiments</li>
-            <li data-target="circadian">Circadian</li>
-            <li data-target="data-import">Data Import</li>
+            <li data-target="circadian" style={{ display: 'none' }}>Circadian</li>
+            <li data-target="data-import" style={{ display: 'none' }}>Data Import</li>
           </ul>
 
           <div className="data-management-sidebar">
@@ -60,6 +60,23 @@ export default function DashboardClient({ user }) {
               <p className="page-subtitle" id="date-subtitle"></p>
             </div>
             <div className="header-actions">
+              {/* Feature hidden temporarily
+              <a
+                href={`/dashboard/digest/${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`}
+                className="btn-sync"
+                style={{
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  background: 'rgba(6, 182, 212, 0.15)',
+                  border: '1px solid rgba(6, 182, 212, 0.3)',
+                  color: '#06B6D4',
+                  marginRight: '0.5rem'
+                }}
+              >
+                📅 Monthly Digest
+              </a>
+              */}
               <button id="sync-now-btn" className="btn-sync">Sync Now</button>
               {/* User avatar + sign out */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -145,6 +162,13 @@ export default function DashboardClient({ user }) {
                   {[...Array(8)].map((_, i) => <div key={i} className="waveform-bar"></div>)}
                 </div>
               </div>
+
+              {/* Anomaly Detection Card */}
+              <div className="bento-card span-2" id="anomaly-card" style={{ display: 'none', borderLeft: '4px solid #FFD166', background: 'linear-gradient(145deg, rgba(30, 32, 45, 0.8), rgba(20, 22, 30, 0.95))' }}>
+                <h2 className="panel-title" style={{ color: '#FFD166', marginBottom: '8px' }}>⚡ UNUSUAL READING DETECTED</h2>
+                <p id="anomaly-insight-text" style={{ lineHeight: 1.7, fontSize: '0.9rem' }}></p>
+              </div>
+
 
               <div className="bento-card span-2">
                 <div className="card-header-flex">
@@ -283,9 +307,9 @@ export default function DashboardClient({ user }) {
                       <span className="badge-lite">Live Analysis</span>
                     </div>
                   </div>
-                  <p id="sleep-short-term-insight" className="insight-text" style={{ fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.9 }}>
-                    Comparing last night&apos;s data to your weekly average...
-                  </p>
+                  <div id="sleep-short-term-insight" className="insight-text" style={{ fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.9 }}>
+                    Analyzing your 7-day rolling recovery data...
+                  </div>
                 </div>
 
                 {/* Historical Synthesis (Long-term) */}
@@ -304,9 +328,9 @@ export default function DashboardClient({ user }) {
                       <span className="badge-lite">Deep Context</span>
                     </div>
                   </div>
-                  <p id="sleep-long-term-insight" className="insight-text" style={{ fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.9 }}>
+                  <div id="sleep-long-term-insight" className="insight-text" style={{ fontSize: '0.95rem', lineHeight: '1.7', opacity: 0.9 }}>
                     Analyzing long-term sleep architecture...
-                  </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -386,12 +410,9 @@ export default function DashboardClient({ user }) {
               <div className="bento-card span-full">
                 <div className="card-header-flex">
                   <h2 className="panel-title">HABIT IMPACT MATRIX</h2>
-                  <label className="lag-toggle" title="Calculates effects on the biometrics for the day after the habit">
-                    <input type="checkbox" id="lag-toggle-cb" defaultChecked />
-                    <span className="lag-toggle-label">Next-day Effect</span>
-                  </label>
+                
                 </div>
-                <p className="kpi-subtext">Select a habit to see its exact mathematical dividend or tax on your core biometrics.</p>
+                 <p className="kpi-subtext">How each biometric deviates from your <strong>14-day rolling average</strong> on days you log this habit or workout — isolates the signal from your general fitness trend.</p>
                 <div className="mt-4" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem' }}>
                   <span style={{ color: 'var(--color-text-secondary)' }}>Analyze Habit:</span>
                   <select id="habit-impact-select" className="neon-select" style={{ background: 'var(--color-bg-void)', color: 'white', border: '1px solid var(--color-border-card)', padding: '0.5rem 1rem', borderRadius: '8px', minWidth: '200px', fontWeight: 500 }}></select>
@@ -401,7 +422,7 @@ export default function DashboardClient({ user }) {
                     <div key={metric} className="bento-card" style={{ background: 'rgba(255,255,255,0.02)', padding: '1.5rem 1rem', textAlign: 'center' }}>
                       <div className="kpi-subtext">{metric === 'hrv' ? 'HRV' : metric === 'rhr' ? 'RHR' : metric === 'efficiency' ? 'Sleep Efficiency' : 'Deep Sleep'} Impact</div>
                       <div id={`impact-${metric}`} className="data-primary" style={{ fontSize: '1.8rem', margin: '0.5rem 0' }}>--</div>
-                      <div className="badge-lite" style={{ background: 'transparent', color: 'var(--color-text-secondary)', width: 'auto' }} id={`impact-${metric}-raw`}>-- vs --</div>
+                      <div className="badge-lite" style={{ background: 'transparent', color: 'var(--color-text-secondary)', width: 'auto' }} id={`impact-${metric}-raw`}>vs norm</div>
                     </div>
                   ))}
                 </div>
@@ -468,6 +489,43 @@ export default function DashboardClient({ user }) {
             </div>
           </div>
         </div>
+
+        {/* Conversational Coach Features - Hidden temporarily
+        <div id="ai-chat-overlay" className="chat-overlay" style={{ display: 'none', position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.4)', backdropFilter: 'blur(4px)', zIndex: 998 }} />
+
+        <div id="ai-chat-drawer" className="chat-drawer">
+          <div className="chat-drawer-header">
+            <div className="chat-drawer-title">
+              <span className="logo-icon white" style={{ marginRight: '6px' }}>✦</span>
+              <span>Ask Ekatra Coach</span>
+            </div>
+            <button id="chat-drawer-close" className="btn-close" style={{ border: 'none', background: 'transparent', color: '#94A3B8', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+          </div>
+          <div id="chat-drawer-messages" className="chat-drawer-messages">
+            <div className="chat-msg system">
+              <strong>Ekatra AI Coach Scope:</strong><br/>
+              I have secure access to your <strong>30-day Apple Watch biometrics</strong> (HRV, RHR, Deep/REM sleep) and <strong>logged workouts & habits</strong>. Ask me to identify trends or correlations!
+              <br/><br/>
+              <em>Example queries:</em>
+              <ul>
+                <li>"How has my sleep quality impacted my HRV this week?"</li>
+                <li>"Am I recovered enough for a heavy session today?"</li>
+                <li>"What patterns do you see in my resting heart rate?"</li>
+              </ul>
+              <small style={{ opacity: 0.65, display: 'block', marginTop: '0.5rem' }}>*Advice is educational; not for medical diagnosis.</small>
+            </div>
+          </div>
+          <div className="chat-drawer-input-area">
+            <input type="text" id="chat-drawer-input" className="chat-drawer-input" placeholder="Ask your coach..." />
+            <button id="chat-drawer-send" className="chat-drawer-send-btn">Send</button>
+          </div>
+        </div>
+
+        <button id="fab-ai-chat" className="chat-fab" title="Ask Coach AI">
+          <span className="fab-icon" style={{ fontSize: '24px' }}>💬</span>
+        </button>
+        */}
+
       </div>
     </>
   );
